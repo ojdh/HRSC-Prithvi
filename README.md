@@ -4,7 +4,7 @@ A mobile-friendly club portal for Red, Black and White. Matchdays run weekly fro
 
 ## Organiser onboarding
 
-The first organiser signs in with ChatGPT and supplies the one-use `CLUB_SETUP_KEY` configured in the hosted environment. It is never stored in source or sent to the browser. Add the squads and send each player a personal invitation. The site is publicly reachable, while club records require sign-in and a claimed personal invitation. Sign-in identifies the player; server authorization protects organiser operations.
+The first organiser signs in through Cloudflare Access and supplies the one-use `CLUB_SETUP_KEY` configured as a Worker secret. It is never stored in source or sent to the browser. Add the squads and send each player a personal invitation. The site is publicly reachable, while club records require sign-in and a claimed personal invitation. Sign-in identifies the player; server authorization protects organiser operations.
 
 ## Match days and stats
 
@@ -22,9 +22,36 @@ Cloudflare D1 stores the club document with optimistic concurrency and separate 
 
 ## Validation
 
-Run the Sites build workflow, then `node --import ./scripts/sites-env.mjs tests/club-integration.mjs` for isolated Worker, D1 and R2 integration checks. The test creates no production records. Typecheck with `node node_modules/typescript/bin/tsc --noEmit`.
+Run `pnpm build`, then `node --import ./scripts/sites-env.mjs tests/club-integration.mjs` for isolated Worker, D1, R2 and Access-token integration checks. The test creates no production records. Typecheck with `node node_modules/typescript/bin/tsc --noEmit`.
 
-Production ChatGPT sign-in uses the platform-owned flow.
+## Sign-in
+
+Cloudflare Access protects the whole site and forwards a signed JWT (`Cf-Access-Jwt-Assertion`) with every request. `app/auth.ts` verifies its RS256 signature against the team's published keys and checks the issuer, audience and expiry; no other identity header is trusted. The player's identity is the token's `sub`, so a person must sign in with the same email each time. Missing `CF_ACCESS_TEAM_URL` or `CF_ACCESS_AUD` fails closed.
+
+## Local development
+
+```sh
+pnpm install --frozen-lockfile
+npx wrangler d1 migrations apply DB --local
+echo 'CLUB_SETUP_KEY=local-setup-key' > .dev.vars
+pnpm dev
+```
+
+`pnpm dev` serves http://localhost:5173 and `build/access-dev-plugin.ts` stands in for Access: it signs every local request in as `organiser@localhost.test` with a throwaway key, so the Worker runs the same verification as production.
+
+## Deploying to Cloudflare
+
+One-time setup, from a shell logged in with `npx wrangler login`:
+
+1. `npx wrangler d1 create hrsc-prithvi` and copy the printed `database_id` into `wrangler.jsonc`.
+2. `npx wrangler r2 bucket create hrsc-prithvi-media`.
+3. `npx wrangler d1 migrations apply DB --remote --config wrangler.jsonc`.
+4. `npx wrangler secret put CLUB_SETUP_KEY` (choose a long random value; share it only with the organiser).
+5. `pnpm build && npx wrangler deploy` to create the Worker, then attach a custom domain or use its `workers.dev` URL.
+6. In Cloudflare Zero Trust, create a self-hosted Access application for that hostname (the whole site). Add an Allow policy for the people who should sign in, for example "Emails" for the roster, or "Everyone" with the One-time PIN login method and let invitations decide who joins. Access's free plan covers 50 users.
+7. Copy the application's Audience (AUD) tag and your team URL (`https://<team>.cloudflareaccess.com`) into `wrangler.jsonc` `vars`, then deploy again.
+
+Afterwards, run the Deploy workflow in GitHub Actions (`.github/workflows/deploy.yml`). It needs the repository secrets `CLOUDFLARE_API_TOKEN` (Workers Scripts, D1 and R2 edit) and `CLOUDFLARE_ACCOUNT_ID`. It refuses to deploy while any `REPLACE_WITH_` placeholder remains.
 
 ## Assets
 
@@ -43,4 +70,4 @@ The organiser manages roster details (including district), invitations, archival
 - Admin, invitation and voting backend: `app/api/club/route.ts`, `app/join/route.ts`, `lib/server-invitations.ts`.
 - Database schema and migrations: `db/schema.ts`, `drizzle/`.
 
-Use Control room on the hosted site for routine score and roster updates. Source code does not contain the live player database or uploaded media. Those remain in the hosted D1/R2 services. GitHub changes do not automatically deploy to Sites; publish the updated source through the Sites workflow. Running elsewhere also requires replacing platform ChatGPT authentication and configuring D1/R2 bindings. Do not put live database exports, invitation tokens or credentials in a public repository.
+Use Control room on the hosted site for routine score and roster updates. Source code does not contain the live player database or uploaded media. Those remain in the hosted D1/R2 services. Do not put live database exports, invitation tokens or credentials in a public repository.

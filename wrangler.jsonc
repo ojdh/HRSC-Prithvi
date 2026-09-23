@@ -1,0 +1,24 @@
+// Production Worker configuration. Replace each REPLACE_WITH_* value with the
+// IDs printed while provisioning (see README "Deploying to Cloudflare"). None
+// of these values are secrets; CLUB_SETUP_KEY is set with `wrangler secret put`.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hrsc-prithvi",
+  "main": "vinext/server/fetch-handler",
+  "compatibility_date": "2026-05-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "hrsc-prithvi",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "migrations_dir": "drizzle"
+    }
+  ],
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "hrsc-prithvi-media" }],
+  "vars": {
+    "CF_ACCESS_TEAM_URL": "https://REPLACE_WITH_TEAM_NAME.cloudflareaccess.com",
+    "CF_ACCESS_AUD": "REPLACE_WITH_ACCESS_APPLICATION_AUD"
+  }
+}

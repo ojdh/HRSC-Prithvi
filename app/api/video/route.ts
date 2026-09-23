@@ -1,5 +1,5 @@
 import {env} from 'cloudflare:workers';
-import {getChatGPTUser} from '../../chatgpt-auth';
+import {getUser} from '../../auth';
 import {ClubError,check,readClub,saveClub} from '@/lib/server-club';
 import type {Highlight} from '@/lib/club';
 export const dynamic='force-dynamic';
@@ -11,7 +11,7 @@ function mime(bytes:Uint8Array){
 }
 export async function POST(req:Request){let key:string|undefined;try{
   check(req.headers.get('origin')===new URL(req.url).origin,'Invalid origin.',403);
-  const user=await getChatGPTUser();check(user,'Sign in first.',401);check(env.BUCKET,'Video storage is unavailable.');
+  const user=await getUser();check(user,'Sign in first.',401);check(env.BUCKET,'Video storage is unavailable.');
   check((Number(req.headers.get('content-length'))||0)<25000000,'Choose a clip smaller than 20 MB.');
   const form=await req.formData(),file=form.get('video'),target=form.get('target');
   check(file instanceof File&&file.size>0&&file.size<=20*1024*1024,'Choose an MP4 or WebM clip under 20 MB.');
@@ -38,7 +38,7 @@ export async function POST(req:Request){let key:string|undefined;try{
 }catch(e){if(key&&env.BUCKET)await env.BUCKET.delete(key).catch(()=>{});return failure(e);}}
 
 export async function GET(req:Request){try{
-  const user=await getChatGPTUser();check(user,'Sign in first.',401);
+  const user=await getUser();check(user,'Sign in first.',401);
   const stored=await readClub();check(stored?.club.players.some(p=>p.userId===user.userId&&p.active!==false)||stored?.club.adminId===user.userId,'Club membership required.',403);
   const key=new URL(req.url).searchParams.get('key');check(key&&/^videos\/[a-f0-9-]{36}$/.test(key),'Video not found.',404);
   check(stored,'Club unavailable.',404);
@@ -59,7 +59,7 @@ export async function GET(req:Request){try{
 
 export async function DELETE(req:Request){try{
   check(req.headers.get('origin')===new URL(req.url).origin,'Invalid origin.',403);
-  const user=await getChatGPTUser();check(user,'Sign in first.',401);
+  const user=await getUser();check(user,'Sign in first.',401);
   const stored=await readClub();check(stored,'Club not found.',404);
   const key=new URL(req.url).searchParams.get('key');check(key&&/^videos\/[a-f0-9-]{36}$/.test(key),'Video not found.',404);
   const admin=stored.club.adminId===user.userId;

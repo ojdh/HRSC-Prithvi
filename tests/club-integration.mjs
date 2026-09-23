@@ -7,19 +7,41 @@ const require=createRequire(import.meta.url);
 const workerRequire=createRequire(require.resolve('wrangler/package.json'));
 const {Miniflare}=workerRequire('miniflare');
 const modulePaths=(await readdir('dist/server',{recursive:true})).filter(p=>/\.m?js$/.test(p)&&p!=='index.js');
-const mf=new Miniflare({modules:[{type:'ESModule',path:resolve('dist/server/index.js')},...modulePaths.map(p=>({type:'ESModule',path:resolve('dist/server',p)}))],modulesRoot:resolve('dist/server'),compatibilityDate:'2026-05-15',compatibilityFlags:['nodejs_compat'],d1Databases:{DB:'hrsc-integration-only'},r2Buckets:{BUCKET:'hrsc-integration-only'},bindings:{CLUB_SETUP_KEY:'test-setup-secret'},cf:false});
+// A stand-in Cloudflare Access team: its own signing key, served from the certs endpoint.
+const teamUrl='https://hrsc-test.cloudflareaccess.com',audience='test-access-aud';
+const signing={name:'RSASSA-PKCS1-v1_5',modulusLength:2048,publicExponent:new Uint8Array([1,0,1]),hash:'SHA-256'};
+const accessKey=await crypto.subtle.generateKey(signing,true,['sign','verify']);
+const foreignKey=await crypto.subtle.generateKey(signing,true,['sign','verify']);
+const jwks={keys:[{...await crypto.subtle.exportKey('jwk',accessKey.publicKey),kid:'access-key',alg:'RS256',use:'sig'}]};
+const accessService=req=>new URL(req.url).href===teamUrl+'/cdn-cgi/access/certs'?Response.json(jwks):new Response('not found',{status:404});
+const b64url=value=>Buffer.from(value).toString('base64url');
+async function accessToken(user,claims={},key=accessKey.privateKey,kid='access-key'){const now=Math.floor(Date.now()/1000);const unsigned=b64url(JSON.stringify({alg:'RS256',kid,typ:'JWT'}))+'.'+b64url(JSON.stringify({aud:[audience],iss:teamUrl,sub:user,email:user+'@test.invalid',iat:now,nbf:now,exp:now+3600,...claims}));return unsigned+'.'+b64url(await crypto.subtle.sign(signing,key,new TextEncoder().encode(unsigned)))}
+const workerOptions={modules:[{type:'ESModule',path:resolve('dist/server/index.js')},...modulePaths.map(p=>({type:'ESModule',path:resolve('dist/server',p)}))],modulesRoot:resolve('dist/server'),compatibilityDate:'2026-05-15',compatibilityFlags:['nodejs_compat'],d1Databases:{DB:'hrsc-integration-only'},r2Buckets:{BUCKET:'hrsc-integration-only'},outboundService:accessService,cf:false};
+const mf=new Miniflare({...workerOptions,bindings:{CLUB_SETUP_KEY:'test-setup-secret',CF_ACCESS_TEAM_URL:teamUrl,CF_ACCESS_AUD:audience}});
 const origin='https://club.test';
 let checks=0;
 const ok=(value,message)=>{assert.ok(value,message);checks++};
-function headers(user){return {'Content-Type':'application/json',Origin:origin,...(user?{'oai-authenticated-user-id':user,'oai-authenticated-user-email':user+'@test.invalid'}:{})}}
-async function get(user='owner'){const r=await mf.dispatchFetch(origin+'/api/club',{headers:headers(user)});return {status:r.status,data:await r.json()}}
-async function post(action,body={},user='owner',revision){const v=revision??(await get(user)).data.revision;const r=await mf.dispatchFetch(origin+'/api/club',{method:'POST',headers:headers(user),body:JSON.stringify({action,revision:v,...body})});return {status:r.status,data:await r.json()}}
+async function headers(user){return {'Content-Type':'application/json',Origin:origin,...(user?{'Cf-Access-Jwt-Assertion':await accessToken(user)}:{})}}
+async function get(user='owner'){const r=await mf.dispatchFetch(origin+'/api/club',{headers:await headers(user)});return {status:r.status,data:await r.json()}}
+async function post(action,body={},user='owner',revision){const v=revision??(await get(user)).data.revision;const r=await mf.dispatchFetch(origin+'/api/club',{method:'POST',headers:await headers(user),body:JSON.stringify({action,revision:v,...body})});return {status:r.status,data:await r.json()}}
 async function success(action,body={},user='owner'){const r=await post(action,body,user);assert.equal(r.status,200,JSON.stringify(r));checks++;return r.data}
 try{
-  const db=await mf.getD1Database('DB');
   const sql=await readFile('drizzle/0000_simple_lightspeed.sql','utf8');
-  for(const statement of sql.split('--> statement-breakpoint').filter(x=>x.trim()))await db.prepare(statement).run();
+  async function migrate(instance){const db=await instance.getD1Database('DB');for(const statement of sql.split('--> statement-breakpoint').filter(x=>x.trim()))await db.prepare(statement).run();}
+  await migrate(mf);
   ok((await get(null)).data.initialized===false,'clean club');
+  // Identity comes only from a valid Access token; anything else is anonymous.
+  async function initializeWith(extraHeaders){return (await mf.dispatchFetch(origin+'/api/club',{method:'POST',headers:{'Content-Type':'application/json',Origin:origin,...extraHeaders},body:JSON.stringify({action:'initialize',key:'test-setup-secret',name:'Intruder',team:'red'})})).status}
+  ok(await initializeWith({'oai-authenticated-user-id':'owner','oai-authenticated-user-email':'owner@test.invalid'})===401,'forged ChatGPT identity headers ignored');
+  ok(await initializeWith({'Cf-Access-Jwt-Assertion':await accessToken('owner',{},foreignKey.privateKey)})===401,'token signed by another key rejected');
+  ok(await initializeWith({'Cf-Access-Jwt-Assertion':await accessToken('owner',{aud:['another-app']})})===401,'token for another Access application rejected');
+  ok(await initializeWith({'Cf-Access-Jwt-Assertion':await accessToken('owner',{iss:'https://evil.cloudflareaccess.com'})})===401,'token from another Access team rejected');
+  ok(await initializeWith({'Cf-Access-Jwt-Assertion':await accessToken('owner',{exp:Math.floor(Date.now()/1000)-60})})===401,'expired token rejected');
+  ok(await initializeWith({'Cf-Access-Jwt-Assertion':'not.a.jwt'})===401,'malformed token rejected');
+  const [unsignedHead,unsignedBody]=(await accessToken('owner')).split('.');
+  ok(await initializeWith({'Cf-Access-Jwt-Assertion':unsignedHead+'.'+unsignedBody+'.'})===401,'unsigned token rejected');
+  const unconfigured=new Miniflare({...workerOptions,bindings:{CLUB_SETUP_KEY:'test-setup-secret'}});
+  try{await migrate(unconfigured);ok((await unconfigured.dispatchFetch(origin+'/api/club',{headers:await headers('owner')})).status===503,'missing Access configuration fails closed')}finally{await unconfigured.dispose()}
   ok((await post('initialize',{key:'bad',name:'Organiser',team:'red'})).status===403,'setup code required');
   await success('initialize',{key:'test-setup-secret',name:'Organiser',team:'red'});
   ok((await get(null)).data.players.length===0,'anonymous visitors see no roster');
@@ -44,9 +66,9 @@ try{
       const guest=await mf.dispatchFetch(origin+'/api/club',{headers:{Cookie:cookie}});const guestData=await guest.json();
       ok(guestData.invitation.name===p.name&&guestData.players.length===0,'guest invitation survives redirect without exposing roster');
       const html=await (await mf.dispatchFetch(origin+'/?view=profile',{headers:{Cookie:cookie}})).text();
-      ok(html.includes('return_to=%2F%3Fview%3Dprofile'),'sign-in return path rendered server-side');
+      ok(html.includes('href="/?view=profile"'),'sign-in return path rendered server-side');
       const rev=(await get(u)).data.revision;
-      const claimed=await mf.dispatchFetch(origin+'/api/club',{method:'POST',headers:{...headers(u),Cookie:cookie},body:JSON.stringify({action:'claim',revision:rev})});
+      const claimed=await mf.dispatchFetch(origin+'/api/club',{method:'POST',headers:{...await headers(u),Cookie:cookie},body:JSON.stringify({action:'claim',revision:rev})});
       ok(claimed.status===200&&claimed.headers.get('set-cookie').includes('Max-Age=0'),'claim works after sign-in without token in URL');
       ok(!(await get()).data.players.some(p=>p.inviteToken||p.legacyInviteHash),'invite secrets never exposed');
     }else await success('claim',{token:invites[u]},u);
@@ -92,13 +114,13 @@ try{
   ok((await get()).data.days[0].videoUrl.includes('youtu.be'),'full match link saved');
   ok((await post('setMatchVideo',{dayId,videoUrl:'https://evil.test/video'},'black-user')).status===403,'player cannot edit match replay');
   const clipBytes=Buffer.concat([Buffer.from([0,0,0,20]),Buffer.from('ftyp'),Buffer.alloc(32)]);
-  async function videoUpload(user,values){const f=new FormData();for(const [k,v] of Object.entries(values))f.set(k,v);f.set('video',new File([clipBytes],'clip.mp4',{type:'video/mp4'}));const req=new Request(origin+'/api/video',{method:'POST',headers:{Origin:origin,'oai-authenticated-user-id':user,'oai-authenticated-user-email':user+'@test.invalid'},body:f});return mf.dispatchFetch(req.url,{method:'POST',headers:Object.fromEntries(req.headers),body:await req.arrayBuffer()});}
+  async function videoUpload(user,values){const f=new FormData();for(const [k,v] of Object.entries(values))f.set(k,v);f.set('video',new File([clipBytes],'clip.mp4',{type:'video/mp4'}));const req=new Request(origin+'/api/video',{method:'POST',headers:{Origin:origin,'Cf-Access-Jwt-Assertion':await accessToken(user)},body:f});return mf.dispatchFetch(req.url,{method:'POST',headers:Object.fromEntries(req.headers),body:await req.arrayBuffer()});}
   ok((await videoUpload('black-user',{target:'profile',playerId:black.id,kind:'Goal'})).status===403,'players cannot post their own highlights');
   ok((await videoUpload('owner',{target:'profile',playerId:black.id,kind:'Goal',note:'First strike'})).status===200,'organiser posts player highlight');
   state=(await get()).data;const clipKey=state.players.find(p=>p.id===black.id).highlights[0].key;
-  ok((await mf.dispatchFetch(origin+'/api/video?key='+encodeURIComponent(clipKey),{headers:{...headers('black-user'),Range:'bytes=0-11'}})).status===206,'member can seek highlight video');
-  ok((await mf.dispatchFetch(origin+'/api/video?key='+encodeURIComponent(clipKey),{headers:headers('intruder')})).status===403,'non-member cannot watch video');
-  ok((await mf.dispatchFetch(origin+'/api/video?key='+encodeURIComponent(clipKey),{method:'DELETE',headers:headers('black-user')})).status===403,'player cannot remove highlight');
+  ok((await mf.dispatchFetch(origin+'/api/video?key='+encodeURIComponent(clipKey),{headers:{...await headers('black-user'),Range:'bytes=0-11'}})).status===206,'member can seek highlight video');
+  ok((await mf.dispatchFetch(origin+'/api/video?key='+encodeURIComponent(clipKey),{headers:await headers('intruder')})).status===403,'non-member cannot watch video');
+  ok((await mf.dispatchFetch(origin+'/api/video?key='+encodeURIComponent(clipKey),{method:'DELETE',headers:await headers('black-user')})).status===403,'player cannot remove highlight');
   await success('archivePlayer',{playerId:red.id});
   state=(await get()).data;ok(state.players.find(p=>p.id===red.id).active===false&&state.days[0].rounds[0].goals.length===3,'archive preserves historical goals');
   ok((await post('vote',{dayId,candidate:black.id},'red-user')).status===400,'archived player cannot vote');
@@ -108,11 +130,11 @@ try{
   ok((await post('editPlayer',{...fields,...red,name:'Wrong overwrite'},'owner',stale)).status===409,'stale updates rejected');
   state=(await get()).data;ok(!JSON.stringify(state).includes('userId')&&!JSON.stringify(state).includes('inviteHash'),'private identity and invitation hashes not disclosed');
   const form=new FormData();form.set('photo',new File([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jq24AAAAASUVORK5CYII=','base64')],'avatar.png',{type:'image/png'}));
-  const serialized=new Request(origin+'/api/photo',{method:'POST',headers:{Origin:origin,'oai-authenticated-user-id':'black-user','oai-authenticated-user-email':'black-user@test.invalid'},body:form});
+  const serialized=new Request(origin+'/api/photo',{method:'POST',headers:{Origin:origin,'Cf-Access-Jwt-Assertion':await accessToken('black-user')},body:form});
   const upload=await mf.dispatchFetch(serialized.url,{method:'POST',headers:Object.fromEntries(serialized.headers),body:await serialized.arrayBuffer()});
   ok(upload.status===200,'authenticated photo upload saved: '+upload.status+' '+await upload.text());
   const photo=(await get()).data.players.find(p=>p.id===black.id).photo;
-  const photoRes=await mf.dispatchFetch(origin+'/api/photo?key='+encodeURIComponent(photo),{headers:headers('black-user')});
+  const photoRes=await mf.dispatchFetch(origin+'/api/photo?key='+encodeURIComponent(photo),{headers:await headers('black-user')});
   ok(photoRes.status===200&&photoRes.headers.get('content-type')==='image/png','stored photo served');
   ok((await mf.dispatchFetch(origin+'/api/photo?key='+encodeURIComponent(photo))).status===401,'photo needs sign-in');
   const ts=require('typescript');const source=await readFile('lib/club.ts','utf8');const js=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ES2022,target:ts.ScriptTarget.ES2022}}).outputText;const model=await import('data:text/javascript;base64,'+Buffer.from(js).toString('base64'));

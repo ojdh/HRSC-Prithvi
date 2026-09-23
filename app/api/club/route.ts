@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { z } from 'zod';
-import { getChatGPTUser } from '../../chatgpt-auth';
+import { getUser } from '../../auth';
 import { TEAMS,nextMatch,result,type Club,type Day } from '@/lib/club';
 import { db,readClub,saveClub,check,digest,token,ClubError } from '@/lib/server-club';
 import {pendingInvite,findInvitation,inviteCookie} from '@/lib/server-invitations';
@@ -10,7 +10,7 @@ const details=z.object({name:z.string().trim().min(1).max(60),age:z.number().int
 function response(value:unknown,status=200){return Response.json(value,{status,headers:{'Cache-Control':'private, no-store'}});}
 function fail(e:unknown){if(e instanceof ClubError)return response({error:e.message},e.status);if(e instanceof z.ZodError)return response({error:e.issues[0].message},400);console.error('Club request failed',e instanceof Error?e.message:'unknown');return response({error:'We could not save or load that. Please retry; your form is still here.'},503);}
 export async function GET(req:Request){try{
-  const user=await getChatGPTUser();const stored=await readClub();
+  const user=await getUser();const stored=await readClub();
   if(!stored)return response({players:[],days:[],revision:0,initialized:false,isAdmin:false,me:null,polls:{}});
   const invited=await findInvitation(stored.club,pendingInvite(req));const invitation=invited&&!invited.userId?{name:invited.name,team:invited.team}:undefined;
   if(!user)return response({players:[],days:[],revision:0,initialized:true,isAdmin:false,me:null,polls:{},invitation});
@@ -29,7 +29,7 @@ export async function GET(req:Request){try{
 export async function POST(req:Request){try{
   const origin=req.headers.get('origin');check(!origin||origin===new URL(req.url).origin,'This request must come from the club website.',403);
   check((Number(req.headers.get('content-length'))||0)<100000,'Request too large.');
-  const user=await getChatGPTUser();check(user,'Please sign in first.',401);
+  const user=await getUser();check(user,'Please sign in first.',401);
   const body=z.record(z.unknown()).parse(await req.json());const action=z.string().parse(body.action);const stored=await readClub();
   if(action==='initialize'){
     check(!stored,'The club has already been set up.',409);
@@ -58,7 +58,7 @@ export async function POST(req:Request){try{
   check(body.revision===revision,'The club was updated. Refresh before saving this change.',409);
   let extra:Record<string,unknown>={};
   if(action==='claim'){
-    check(!me,'This ChatGPT account already has a player profile. Sign out and use the invited player’s account.');
+    check(!me,'This account already has a player profile. Sign out and sign in with the invited player’s email.');
     const p=await findInvitation(club,z.string().min(20).max(150).parse(body.token||pendingInvite(req)));check(p&&!p.userId,'This invitation has already been used or is unavailable. Ask your organiser for the current link.');p.userId=user.userId;delete p.inviteHash;delete p.legacyInviteHash;delete p.inviteToken;
   }else{
     check(admin,'Only the organiser can change match records and teams.',403);
