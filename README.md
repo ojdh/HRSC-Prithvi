@@ -18,11 +18,11 @@ One irreversible vote per attending player; no own-team candidates. Personal inv
 
 ## Storage
 
-Cloudflare D1 stores the club document with optimistic concurrency and separate ballot/participation tables. R2 stores authenticated profile photos, admin-uploaded matchday clips, and admin-uploaded player highlights. Full match replays use a shareable YouTube, Vimeo, or Drive URL. Uploaded video clips are MP4 or WebM, capped at 20 MB each; member video playback supports byte ranges. JPG/PNG/WebP uploads are restricted to 2 MB and checked for image signatures. All write permissions and vote restrictions are enforced server-side. Browser storage is not the data source.
+Cloudflare D1 stores the club document with optimistic concurrency and separate ballot/participation tables. R2 stores authenticated profile photos, admin-uploaded matchday clips, and admin-uploaded player highlights. Full match replays use a shareable YouTube, Vimeo, or Drive URL. Uploaded video clips are MP4 or WebM, capped at 20 MB each; member video playback supports byte ranges. JPG/PNG/WebP uploads are restricted to 2 MB and checked for image signatures; larger profile photos are scaled down and re-encoded as JPEG in the browser (`lib/photo-compression.ts`) before upload. All write permissions and vote restrictions are enforced server-side. Browser storage is not the data source.
 
 ## Validation
 
-Run the Sites build workflow, then `node --import ./scripts/sites-env.mjs tests/club-integration.mjs` for isolated Worker, D1 and R2 integration checks. The test creates no production records. Typecheck with `node node_modules/typescript/bin/tsc --noEmit`.
+Run the Sites build workflow, then `node --import ./scripts/sites-env.mjs tests/club-integration.mjs` for isolated Worker, D1 and R2 integration checks. The test creates no production records. Photo compression has unit checks: `node --test tests/photo-compression.mjs`. Typecheck with `node node_modules/typescript/bin/tsc --noEmit`.
 
 Production ChatGPT sign-in uses the platform-owned flow.
 
