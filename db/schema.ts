@@ -5,3 +5,6 @@ export const receipts = sqliteTable('vote_receipts', {day:text('day').notNull(),
 export const ballots = sqliteTable('ballots', {id:text('id').primaryKey(),day:text('day').notNull(),candidate:text('candidate').notNull()}, t=>[index('idx_ballots_day').on(t.day)]);
 // One-time maintenance audit: counts only, never ballot choices or player identities.
 export const maintenanceEvents = sqliteTable('maintenance_events',{id:text('id').primaryKey(),dayId:text('day_id').notNull(),date:text('date').notNull(),roundsRemoved:integer('rounds_removed').notNull(),votesRemoved:integer('votes_removed').notNull(),playersBefore:integer('players_before').notNull(),completed:integer('completed').notNull().default(0)});
+// Free-tier ledger for R2, written only by lib/r2-budget.ts: operations charged per UTC month, and the size of every stored object.
+export const r2Usage = sqliteTable('r2_usage',{month:text('month').primaryKey(),classA:integer('class_a').notNull().default(0),classB:integer('class_b').notNull().default(0)});
+export const r2Objects = sqliteTable('r2_objects',{key:text('key').primaryKey(),bytes:integer('bytes').notNull()});

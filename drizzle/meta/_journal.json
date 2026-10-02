@@ -22,6 +22,13 @@
       "when": 1790131450325,
       "tag": "0002_remove_practice_matchdays",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1790965225567,
+      "tag": "0003_r2_free_tier_ledger",
+      "breakpoints": true
     }
   ]
 }
