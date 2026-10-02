@@ -38,13 +38,13 @@ try{
     ok(again===invites[u],'copying invite keeps previous link valid');
     if(u==='black-user'){
       const landing=await mf.dispatchFetch(origin+'/join?invite='+encodeURIComponent(invites[u]),{redirect:'manual'});
-      ok(landing.status===303&&landing.headers.get('location')==='/?view=profile','invite redirects to clean profile page');
+      ok(landing.status===303&&landing.headers.get('location')==='/winterleague?view=profile','invite redirects to clean profile page');
       const setCookie=landing.headers.get('set-cookie');ok(setCookie.includes('HttpOnly')&&setCookie.includes('SameSite=Lax')&&setCookie.includes('Secure'),'invite cookie protected');
       const cookie=setCookie.split(';')[0];
       const guest=await mf.dispatchFetch(origin+'/api/club',{headers:{Cookie:cookie}});const guestData=await guest.json();
       ok(guestData.invitation.name===p.name&&guestData.players.length===0,'guest invitation survives redirect without exposing roster');
-      const html=await (await mf.dispatchFetch(origin+'/?view=profile',{headers:{Cookie:cookie}})).text();
-      ok(html.includes('return_to=%2F%3Fview%3Dprofile'),'sign-in return path rendered server-side');
+      const html=await (await mf.dispatchFetch(origin+'/winterleague?view=profile',{headers:{Cookie:cookie}})).text();
+      ok(html.includes('return_to=%2Fwinterleague%3Fview%3Dprofile'),'sign-in return path rendered server-side');
       const rev=(await get(u)).data.revision;
       const claimed=await mf.dispatchFetch(origin+'/api/club',{method:'POST',headers:{...headers(u),Cookie:cookie},body:JSON.stringify({action:'claim',revision:rev})});
       ok(claimed.status===200&&claimed.headers.get('set-cookie').includes('Max-Age=0'),'claim works after sign-in without token in URL');
@@ -53,8 +53,24 @@ try{
   }
   ok((await post('claim',{token:invites['black-user']},'intruder')).status===400,'single-use invitations');
   ok((await post('addPlayer',{...fields,name:'Intruder',team:'black'},'black-user')).status===403,'non-admin writes blocked');
-  ok((await post('profile',{...fields,name:'Black player',team:'red'},'black-user')).status===403,'players cannot edit roster details');
+  ok((await post('profile',{...fields,name:'Black player',team:'red'},'black-user')).status===403,'players cannot switch team through profile editing');
   ok((await get('black-user')).data.players.find(p=>p.id===black.id).team==='black','player cannot switch team');
+  const beforeProfile=(await get()).data;
+  const personal={name:'Black player updated',age:26,height:181,district:'Pokhara',position:'Forward'};
+  await success('profile',personal,'black-user');
+  const afterProfile=(await get()).data;
+  const changed=afterProfile.players.find(p=>p.id===black.id);
+  ok(Object.entries(personal).every(([key,value])=>changed[key]===value),'player can update all personal fields');
+  ok(changed.team==='black'&&changed.linked===true,'profile editing preserves team and account');
+  ok(JSON.stringify(beforeProfile.players.filter(p=>p.id!==black.id))===JSON.stringify(afterProfile.players.filter(p=>p.id!==black.id)),'profile editing leaves other players unchanged');
+  for(const forbidden of [{id:white.id},{userId:'owner'},{active:false},{goals:99},{photo:'players/forged'}]){
+    ok((await post('profile',{...personal,...forbidden},'black-user')).status===403,'profile cannot change protected fields');
+  }
+  ok((await post('profile',personal,'intruder')).status===403,'unlinked account cannot edit a player');
+  ok((await post('profile',{...personal,height:999},'black-user')).status===400,'profile validates personal information');
+  ok((await post('profile',personal,'black-user',beforeProfile.revision)).status===409,'stale profile save cannot overwrite newer records');
+  const legacy=await mf.dispatchFetch(origin+'/?view=vote&day=legacy',{redirect:'manual'});
+  ok(legacy.status>=300&&legacy.status<400&&legacy.headers.get('location')==='/winterleague?view=vote&day=legacy','old voting links redirect to the league');
   const date='2026-09-06',roster=[owner.id,red.id,black.id,white.id];
   const created=await success('createDay',{date,roster,a:'red',b:'black',firstExit:'red'});
   const dayId=created.dayId;

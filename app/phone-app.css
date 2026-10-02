@@ -1,0 +1,25 @@
+.phone-app-tools{display:flex;align-items:center;gap:10px}
+.phone-install{display:inline-flex;align-items:center;gap:7px;min-height:44px;padding:9px 13px;border:1px solid #b2cfa5;border-radius:14px;background:#d5ecc3;color:#234632;font:700 14px Club,sans-serif;white-space:nowrap;transition:background .2s,transform .2s}
+.phone-install:hover{background:#c5e3ae}.phone-install:active{transform:scale(.97)}
+.phone-install:focus-visible{outline:3px solid #347b4d;outline-offset:3px}
+.phone-app-heading{display:flex;align-items:center;gap:14px;font-weight:800;letter-spacing:.06em;color:#285439;margin-bottom:5px;padding-right:20px}
+.phone-app-heading img{border-radius:17px;box-shadow:0 6px 20px #2b5d3320}
+.phone-install-dialog{width:calc(100% - 32px);max-width:420px!important}
+.phone-install-dialog [data-slot=dialog-title]{font-size:26px;line-height:1.2}
+.phone-install-dialog [data-slot=dialog-description]{font-size:16px;color:#526c58}
+.phone-install-steps{list-style:decimal;padding-left:24px;display:grid;gap:15px;font-size:16px;line-height:1.55;color:#31523c}
+.phone-install-steps svg{display:inline;vertical-align:middle}.phone-install-note{font-size:14px;line-height:1.5;color:#586d59}
+.phone-install-primary{justify-content:center;width:100%;min-height:48px}
+.phone-offline{display:flex;align-items:center;gap:6px;color:#785411;font-size:14px;max-width:220px;line-height:1.3}
+@media(max-width:767px){
+ .topbar{padding-top:calc(11px + env(safe-area-inset-top));padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right));gap:8px}
+ .breadcrumb{min-width:0}.breadcrumb>span,.breadcrumb>svg{display:none}.breadcrumb strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:34vw}
+ .top-right{gap:8px;flex-shrink:0}.phone-install{padding:9px;gap:5px;font-size:14px}
+ .phone-offline{max-width:95px;font-size:12px}.phone-offline svg{flex-shrink:0}
+ .phone-offline+*{display:none}
+ .content{padding-left:max(16px,env(safe-area-inset-left));padding-right:max(16px,env(safe-area-inset-right))}
+ .mobile-dock{padding-left:max(5px,env(safe-area-inset-left));padding-right:max(5px,env(safe-area-inset-right))}
+}
+@media(max-width:359px){.phone-install span{display:none}.phone-install{min-width:44px;justify-content:center}}
+@media(display-mode:standalone){.phone-install{display:none}}
+@media(prefers-reduced-motion:reduce){.phone-install{transition:none}}

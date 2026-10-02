@@ -1,6 +1,6 @@
-# HRSC–Prithvi — Winter League
+# Prithvi FC · Club website & Winter league
 
-A mobile-friendly club portal for Red, Black and White. Matchdays run weekly from 7:00–8:30 AM. The season begins September 1, 2026. Voting and results entry are independent: open the vote immediately after the session and enter results later.
+A mobile-friendly club portal for Red, Black and White. Matchdays run weekly from 7:00–8:30 AM. Voting and results entry are independent: open the vote immediately after the session and enter results later.
 
 ## Organiser onboarding
 
@@ -32,11 +32,13 @@ Football photograph: Emilio Garcia, https://unsplash.com/photos/man-playing-socc
 
 ## Control room
 
-The organiser manages roster details (including district), invitations, archival and restoration, matches, goals, assists, videos and voting from Control room. Archiving a player keeps their historical statistics and account mapping. The organiser can open a player profile through the Players screen and post short Goal, Assist, Save, Skill or Foul clips. Players may upload their own portrait; they cannot edit roster fields or post/remove clips.
+The organiser manages roster details (including district), invitations, archival and restoration, matches, goals, assists, videos and voting from Control room. Archiving a player keeps their historical statistics and account mapping. The organiser can open a player profile through the Players screen and post short Goal, Assist, Save, Skill or Foul clips. Players edit their own name, age, height, district, position and portrait from My profile. They cannot change teams, match records, accounts, invitations or video clips. The server derives the editable player from the signed-in account.
 
 ## Editing the website
 
-- Screens and labels: `app/club-app.tsx`.
+- Homepage text, sections and pictures: `app/home-page.tsx`.
+- Homepage colours, typography and animations: `app/home.css`.
+- League screens and labels: `app/club-app.tsx`.
 - Colours, fonts, layout and motion: `app/globals.css`, `app/editorial.css`, `app/motion.css`.
 - Images and bundled fonts: `public/`.
 - League calculations and data types: `lib/club.ts`.
@@ -44,3 +46,13 @@ The organiser manages roster details (including district), invitations, archival
 - Database schema and migrations: `db/schema.ts`, `drizzle/`.
 
 Use Control room on the hosted site for routine score and roster updates. Source code does not contain the live player database or uploaded media. Those remain in the hosted D1/R2 services. GitHub changes do not automatically deploy to Sites; publish the updated source through the Sites workflow. Running elsewhere also requires replacing platform ChatGPT authentication and configuring D1/R2 bindings. Do not put live database exports, invitation tokens or credentials in a public repository.
+
+## Homepage and routes
+
+The public club homepage is `/`. The existing member app is `/winterleague`. Older `/?view=...` links redirect while preserving parameters; legacy hash invitations and setup links are forwarded. Invitation cookies, accounts, APIs and storage remain unchanged. Teams link to filtered squads. Stock football images are editorial photographs, not pictures of club members; replace their source paths in `app/home-page.tsx` with your club photographs.
+
+The future domain `prithvifc.ca` can use this same root and `/winterleague` structure once connected to hosting and DNS. It has not been registered or connected by this code change.
+
+## Phone app
+
+A Web App Manifest and home-screen icons support installation from compatible browsers. Open Winter league and choose the phone icon for installation guidance. iPhone/iPad use Safari → Share → Add to Home Screen. The app launches `/winterleague`; browser accounts and server data stay the same. Offline mode displays a reconnect screen. Personal information, invitations, votes and member media are never saved in a service-worker cache.
