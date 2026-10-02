@@ -60,6 +60,11 @@ export async function POST(req:Request){try{
   if(action==='claim'){
     check(!me,'This account already has a player profile. Sign out and sign in with the invited player’s email.');
     const p=await findInvitation(club,z.string().min(20).max(150).parse(body.token||pendingInvite(req)));check(p&&!p.userId,'This invitation has already been used or is unavailable. Ask your organiser for the current link.');p.userId=user.userId;delete p.inviteHash;delete p.legacyInviteHash;delete p.inviteToken;
+  }else if(action==='profile'){
+    check(me&&me.active!==false,'Only an active linked player can update their profile.',403);
+    const allowed=new Set(['action','revision','name','age','height','district','position']);
+    check(Object.keys(body).every(key=>allowed.has(key)),'You can only update your own personal information.',403);
+    Object.assign(me,details.parse(body));
   }else{
     check(admin,'Only the organiser can change match records and teams.',403);
     if(action==='addPlayer'){
