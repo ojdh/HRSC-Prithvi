@@ -1,6 +1,6 @@
-// Production Worker configuration. Replace each REPLACE_WITH_* value with the
-// IDs printed while provisioning (see README "Deploying to Cloudflare"). None
-// of these values are secrets; CLUB_SETUP_KEY is set with `wrangler secret put`.
+// Production Worker configuration for prithvifc.ca, provisioned as described in
+// README "Deploying to Cloudflare". None of these values are secrets;
+// CLUB_SETUP_KEY is set with `wrangler secret put`.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "hrsc-prithvi",
@@ -14,14 +14,14 @@
     {
       "binding": "DB",
       "database_name": "hrsc-prithvi",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "database_id": "cfdb594e-a9d5-477d-a1de-d9354b26ac56",
       "migrations_dir": "drizzle"
     }
   ],
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "hrsc-prithvi-media" }],
   "vars": {
-    "CF_ACCESS_TEAM_URL": "https://REPLACE_WITH_TEAM_NAME.cloudflareaccess.com",
-    "CF_ACCESS_AUD": "REPLACE_WITH_ACCESS_APPLICATION_AUD",
+    "CF_ACCESS_TEAM_URL": "https://autumn-brook-58da.cloudflareaccess.com",
+    "CF_ACCESS_AUD": "7cca58822bdff5c34ccfc687c0044cb2212a3fd902037eb4afdaca90e0af43a8",
     // Free-tier guardrails enforced by lib/r2-budget.ts. Keep each below R2's
     // free tier (10 GB-month, 1M Class A, 10M Class B per month); see AGENTS.md.
     "R2_STORAGE_QUOTA_BYTES": "8000000000",
