@@ -71,7 +71,7 @@ footer{color:var(--muted);font-size:.9rem;margin-top:48px;border-top:1px solid v
 <h1>Prithvi FC on Cloudflare</h1>
 <p class="lede">How the club website moved from ChatGPT Sites to its own Cloudflare account at <code>prithvifc.ca</code>, why each piece exists, and how it was set up. The page is written at three levels of detail.</p>
 
-<div class="status"><strong>Status, 2 October 2026:</strong> Everything is set up except the first deploy. The last settings are waiting in pull request <a href="https://github.com/ojdh/HRSC-Prithvi/pull/2">ojdh/HRSC-Prithvi#2</a>. Once it's merged and the Deploy workflow runs, the site goes live at <code>prithvifc.ca</code>. Until then, the old ChatGPT Sites copy is still the live one. The <a href="#detail-pending">pending list</a> shows what's left.</div>
+<div class="status"><strong>Status, 2 October 2026:</strong> The site is live on Cloudflare at <a href="https://prithvifc.ca">prithvifc.ca</a>. The homepage is public, and <code>/winterleague</code>, <code>/join</code> and <code>/api</code> ask for an emailed sign-in code. Next, the organiser signs in, enters the setup key and sets up the club again. The <a href="#detail-pending">to-do list</a> shows what's left.</div>
 
 <nav class="tabs" aria-label="Versions">
   <a href="#summary">Summary</a>
@@ -102,7 +102,7 @@ footer{color:var(--muted);font-size:.9rem;margin-top:48px;border-top:1px solid v
   <thead><tr><th>Piece</th><th>Cloudflare service</th><th>Plan</th><th>Status</th></tr></thead>
   <tbody>
     <tr><td>Domain <code>prithvifc.ca</code></td><td>DNS (zone)</td><td>Free</td><td class="ok">Active</td></tr>
-    <tr><td>Website and API</td><td>Workers</td><td>Free (to confirm)</td><td class="todo">First deploy pending</td></tr>
+    <tr><td>Website and API</td><td>Workers <code>hrsc-prithvi</code></td><td>Free</td><td class="ok">Live on <code>prithvifc.ca</code>; <code>workers.dev</code> address off</td></tr>
     <tr><td>Club database</td><td>D1 <code>hrsc-prithvi</code></td><td>Free</td><td class="ok">Created, migrations applied</td></tr>
     <tr><td>Photos and video clips</td><td>R2 <code>hrsc-prithvi-media</code></td><td>Free tier, app-enforced limits</td><td class="ok">Created, empty</td></tr>
     <tr><td>Member sign-in</td><td>Zero Trust Access</td><td>Free (50 seats)</td><td class="ok">Application and policy set up</td></tr>
@@ -351,15 +351,20 @@ footer{color:var(--muted);font-size:.9rem;margin-top:48px;border-top:1px solid v
   </tbody>
 </table></div>
 
-<h3 id="detail-pending">11. Still to do</h3>
+<h3 id="detail-pending">11. Done and still to do</h3>
+<p><strong>Done on 2 October 2026:</strong></p>
 <ul>
-  <li class="todo">Merge PR #2 (production settings and the placeholder-check fix) into the fork's <code>main</code>.</li>
-  <li class="todo">Run the Deploy workflow. The site goes live and <code>prithvifc.ca</code> is attached.</li>
-  <li class="todo">Set <code>CLUB_SETUP_KEY</code>. Then the organiser signs in, enters it, and sets up the club again.</li>
-  <li class="todo">Check the live site: the homepage loads without a sign-in, and <code>/winterleague</code> asks for an emailed code.</li>
-  <li class="todo">Confirm Workers is on the Free plan (Workers &amp; Pages → Plans).</li>
-  <li class="todo">Decide on the old data: start fresh, or import from ChatGPT Sites. Importing would mean remapping player accounts and adding a ledger row for each imported file.</li>
-  <li class="todo">Shut down the ChatGPT Sites copy once the new site works.</li>
+  <li class="ok">Merged PR #2 (production settings and the placeholder-check fix) into the fork's <code>main</code>.</li>
+  <li class="ok">Ran the Deploy workflow. No migrations were pending, the Worker was uploaded, and <code>prithvifc.ca</code> was attached as its custom domain.</li>
+  <li class="ok">Set <code>CLUB_SETUP_KEY</code> as a Worker secret. The only other copy is a private file for the organiser.</li>
+  <li class="ok">Checked the live site: the homepage returns 200 without sign-in; <code>/winterleague</code>, <code>/join</code> and <code>/api/*</code> redirect to the Access sign-in; the <code>workers.dev</code> address is disabled.</li>
+  <li class="ok">Confirmed Workers has no paid plan, so the account is on Workers Free.</li>
+</ul>
+<p><strong>Still to do:</strong></p>
+<ul>
+  <li class="todo">The organiser signs in at <code>prithvifc.ca/winterleague</code>, enters the setup key, rebuilds the squads and sends invitations. Each player's email must be in the Club members rule group first.</li>
+  <li class="todo">Decide on the old data. The new site starts empty, so this is a fresh start unless old data is imported from ChatGPT Sites later. Importing would mean remapping player accounts and adding a ledger row for each imported file.</li>
+  <li class="todo">Shut down the ChatGPT Sites copy once players have moved over.</li>
   <li class="todo">Separate from Cloudflare: the web app manifest, home-screen icons and service worker are referenced but not in the repo, so "Add to Home Screen" can't install yet.</li>
   <li>Optional backstop: a usage-based billing alert under Notifications in the Cloudflare dashboard.</li>
 </ul>
