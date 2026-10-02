@@ -21,6 +21,11 @@
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "hrsc-prithvi-media" }],
   "vars": {
     "CF_ACCESS_TEAM_URL": "https://REPLACE_WITH_TEAM_NAME.cloudflareaccess.com",
-    "CF_ACCESS_AUD": "REPLACE_WITH_ACCESS_APPLICATION_AUD"
+    "CF_ACCESS_AUD": "REPLACE_WITH_ACCESS_APPLICATION_AUD",
+    // Free-tier guardrails enforced by lib/r2-budget.ts. Keep each below R2's
+    // free tier (10 GB-month, 1M Class A, 10M Class B per month); see AGENTS.md.
+    "R2_STORAGE_QUOTA_BYTES": "8000000000",
+    "R2_CLASS_A_MONTHLY_LIMIT": "500000",
+    "R2_CLASS_B_MONTHLY_LIMIT": "5000000"
   }
 }

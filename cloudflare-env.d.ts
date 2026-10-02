@@ -4,5 +4,8 @@ declare namespace Cloudflare {
     BUCKET?: R2Bucket;
     CF_ACCESS_TEAM_URL?: string;
     CF_ACCESS_AUD?: string;
+    R2_STORAGE_QUOTA_BYTES?: string;
+    R2_CLASS_A_MONTHLY_LIMIT?: string;
+    R2_CLASS_B_MONTHLY_LIMIT?: string;
   }
 }
