@@ -20,6 +20,7 @@ jobs:
           node-version: 22
       - run: pnpm install --frozen-lockfile
       - run: node node_modules/typescript/bin/tsc --noEmit
+      - run: node --test tests/r2-boundary.mjs
       - run: pnpm build
       - run: node --import ./scripts/sites-env.mjs tests/club-integration.mjs
 

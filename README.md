@@ -51,6 +51,18 @@ One-time setup, from a shell logged in with `npx wrangler login`:
 6. In Cloudflare Zero Trust, create a self-hosted Access application for `prithvifc.ca` with the paths `winterleague`, `join` and `api`. Leave the rest of the site public. Add an Allow policy for the people who should sign in, for example "Emails" for the roster, or "Everyone" with the One-time PIN login method and let invitations decide who joins. Access's free plan covers 50 users.
 7. Copy the application's Audience (AUD) tag and your team URL (`https://<team>.cloudflareaccess.com`) into `wrangler.jsonc` `vars`, then deploy again.
 
+### Free-tier guardrails
+
+R2 is the only service here that can bill past its free tier, so `lib/r2-budget.ts` charges every R2 call against limits in D1 before R2 is reached. The limits are `wrangler.jsonc` `vars`, set below R2's free tier:
+
+| Var | Value | R2 free tier |
+|---|---|---|
+| `R2_STORAGE_QUOTA_BYTES` | 8 GB | 10 GB-month |
+| `R2_CLASS_A_MONTHLY_LIMIT` (uploads) | 500,000 | 1M a month |
+| `R2_CLASS_B_MONTHLY_LIMIT` (photo views, video chunks) | 5,000,000 | 10M a month |
+
+At the storage limit, uploads are refused until a clip is removed. At a monthly limit, uploads or media views pause until the next UTC month. Missing limits make uploads and views fail closed. The ledger (`r2_usage`, `r2_objects`) starts empty with the database; if existing photos or videos are ever imported, add one `r2_objects` row per imported object. Keep the Workers account on the Free plan, which rejects requests past its daily limit instead of billing. Rules for changing this code are in `AGENTS.md`.
+
 Afterwards, run the Deploy workflow in GitHub Actions (`.github/workflows/deploy.yml`). It needs the repository secrets `CLOUDFLARE_API_TOKEN` (Workers Scripts, D1 and R2 edit) and `CLOUDFLARE_ACCOUNT_ID`. It refuses to deploy while any `REPLACE_WITH_` placeholder remains.
 
 ## Assets

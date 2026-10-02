@@ -17,7 +17,9 @@ const accessService=req=>new URL(req.url).href===teamUrl+'/cdn-cgi/access/certs'
 const b64url=value=>Buffer.from(value).toString('base64url');
 async function accessToken(user,claims={},key=accessKey.privateKey,kid='access-key'){const now=Math.floor(Date.now()/1000);const unsigned=b64url(JSON.stringify({alg:'RS256',kid,typ:'JWT'}))+'.'+b64url(JSON.stringify({aud:[audience],iss:teamUrl,sub:user,email:user+'@test.invalid',iat:now,nbf:now,exp:now+3600,...claims}));return unsigned+'.'+b64url(await crypto.subtle.sign(signing,key,new TextEncoder().encode(unsigned)))}
 const workerOptions={modules:[{type:'ESModule',path:resolve('dist/server/index.js')},...modulePaths.map(p=>({type:'ESModule',path:resolve('dist/server',p)}))],modulesRoot:resolve('dist/server'),compatibilityDate:'2026-05-15',compatibilityFlags:['nodejs_compat'],d1Databases:{DB:'hrsc-integration-only'},r2Buckets:{BUCKET:'hrsc-integration-only'},outboundService:accessService,cf:false};
-const mf=new Miniflare({...workerOptions,bindings:{CLUB_SETUP_KEY:'test-setup-secret',CF_ACCESS_TEAM_URL:teamUrl,CF_ACCESS_AUD:audience}});
+const accessBindings={CLUB_SETUP_KEY:'test-setup-secret',CF_ACCESS_TEAM_URL:teamUrl,CF_ACCESS_AUD:audience};
+const budget=({storage,classA,classB})=>({R2_STORAGE_QUOTA_BYTES:String(storage),R2_CLASS_A_MONTHLY_LIMIT:String(classA),R2_CLASS_B_MONTHLY_LIMIT:String(classB)});
+const mf=new Miniflare({...workerOptions,bindings:{...accessBindings,...budget({storage:1e9,classA:1e6,classB:1e7})}});
 const origin='https://club.test';
 let checks=0;
 const ok=(value,message)=>{assert.ok(value,message);checks++};
@@ -26,8 +28,8 @@ async function get(user='owner'){const r=await mf.dispatchFetch(origin+'/api/clu
 async function post(action,body={},user='owner',revision){const v=revision??(await get(user)).data.revision;const r=await mf.dispatchFetch(origin+'/api/club',{method:'POST',headers:await headers(user),body:JSON.stringify({action,revision:v,...body})});return {status:r.status,data:await r.json()}}
 async function success(action,body={},user='owner'){const r=await post(action,body,user);assert.equal(r.status,200,JSON.stringify(r));checks++;return r.data}
 try{
-  const sql=await readFile('drizzle/0000_simple_lightspeed.sql','utf8');
-  async function migrate(instance){const db=await instance.getD1Database('DB');for(const statement of sql.split('--> statement-breakpoint').filter(x=>x.trim()))await db.prepare(statement).run();}
+  const migrations=await Promise.all((await readdir('drizzle')).filter(f=>f.endsWith('.sql')).sort().map(f=>readFile('drizzle/'+f,'utf8')));
+  async function migrate(instance){const db=await instance.getD1Database('DB');for(const sql of migrations)for(const statement of sql.split('--> statement-breakpoint').filter(x=>x.trim()))await db.prepare(statement).run();}
   await migrate(mf);
   ok((await get(null)).data.initialized===false,'clean club');
   // Identity comes only from a valid Access token; anything else is anonymous.
@@ -157,5 +159,40 @@ try{
   const t=model.teamStats(state.days),p=model.playerStats(state.players,state.days);
   ok(t.find(x=>x.team==='red').wins===1&&t.find(x=>x.team==='black').wins===1,'team wins derived correctly');
   ok(p.find(x=>x.id===owner.id).goals===2&&p.find(x=>x.id===red.id).assists===1&&p.find(x=>x.id===red.id).played===1,'goals assists and selective appearances correct');
+  // Free-tier guardrails: tiny R2 budgets that the steps below hit exactly.
+  const pngBytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jq24AAAAASUVORK5CYII=','base64');
+  async function send(instance,path,user,fields){const f=new FormData();for(const [k,v] of Object.entries(fields))f.set(k,v);const req=new Request(origin+path,{method:'POST',headers:{Origin:origin,'Cf-Access-Jwt-Assertion':await accessToken(user)},body:f});const r=await instance.dispatchFetch(req.url,{method:'POST',headers:Object.fromEntries(req.headers),body:await req.arrayBuffer()});return {status:r.status,error:(await r.json()).error}}
+  const photoFile=()=>new File([pngBytes],'avatar.png',{type:'image/png'}),clipFile=()=>new File([clipBytes],'clip.mp4',{type:'video/mp4'});
+  async function setUp(instance){await migrate(instance);const r=await instance.dispatchFetch(origin+'/api/club',{method:'POST',headers:await headers('owner'),body:JSON.stringify({action:'initialize',key:'test-setup-secret',name:'Organiser',team:'red',revision:0})});assert.equal(r.status,200);const club=await (await instance.dispatchFetch(origin+'/api/club',{headers:await headers('owner')})).json();return club.players[0].id}
+  async function storedObjects(instance){return (await (await instance.getR2Bucket('BUCKET')).list()).objects.length}
+  const tight=new Miniflare({...workerOptions,bindings:{...accessBindings,...budget({storage:pngBytes.length+clipBytes.length,classA:4,classB:1})}});
+  try{
+    const ownerId=await setUp(tight);
+    ok((await send(tight,'/api/photo','owner',{photo:new File([Buffer.from('not an image')],'x.png',{type:'image/png'})})).status===400,'invalid upload rejected');
+    ok((await send(tight,'/api/photo','intruder',{photo:photoFile()})).status===403,'non-member upload rejected');
+    ok((await send(tight,'/api/photo','owner',{photo:photoFile()})).status===200,'photo fits the budget');
+    const clip={target:'profile',playerId:ownerId,kind:'Goal'};
+    ok((await send(tight,'/api/video','owner',{...clip,video:clipFile()})).status===200,'clip fills storage exactly');
+    const full=await send(tight,'/api/video','owner',{...clip,video:clipFile()});
+    ok(full.status===503&&/storage is full/i.test(full.error),'upload past the storage quota refused: '+JSON.stringify(full));
+    ok(await storedObjects(tight)===2,'refused upload stores nothing');
+    const club=await (await tight.dispatchFetch(origin+'/api/club',{headers:await headers('owner')})).json();
+    const [firstClip]=club.players[0].highlights;
+    ok((await tight.dispatchFetch(origin+'/api/video?key='+encodeURIComponent(firstClip.key),{method:'DELETE',headers:await headers('owner')})).status===200,'organiser removes clip');
+    ok((await send(tight,'/api/video','owner',{...clip,video:clipFile()})).status===200,'removing a clip frees its storage');
+    const monthly=await send(tight,'/api/video','owner',{...clip,video:clipFile()});
+    ok(monthly.status===503&&/next month/i.test(monthly.error),'upload past the monthly Class A limit refused: '+JSON.stringify(monthly));
+    const photoKey=(await (await tight.dispatchFetch(origin+'/api/club',{headers:await headers('owner')})).json()).players[0].photo;
+    const ownerHeaders=await headers('owner');
+    const view=()=>tight.dispatchFetch(origin+'/api/photo?key='+encodeURIComponent(photoKey),{headers:ownerHeaders});
+    ok((await view()).status===200,'photo view fits the Class B limit');
+    ok((await view()).status===503,'view past the monthly Class B limit refused');
+  }finally{await tight.dispose()}
+  const unbudgeted=new Miniflare({...workerOptions,bindings:accessBindings});
+  try{
+    await setUp(unbudgeted);
+    ok((await send(unbudgeted,'/api/photo','owner',{photo:photoFile()})).status===503,'missing R2 budget configuration fails closed');
+    ok(await storedObjects(unbudgeted)===0,'unbudgeted upload stores nothing');
+  }finally{await unbudgeted.dispose()}
   console.log(JSON.stringify({passed:checks,productionDataTouched:false}));
 }finally{await mf.dispose()}
