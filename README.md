@@ -48,7 +48,7 @@ One-time setup, from a shell logged in with `npx wrangler login`:
 3. `npx wrangler d1 migrations apply DB --remote --config wrangler.jsonc`.
 4. `npx wrangler secret put CLUB_SETUP_KEY` (choose a long random value; share it only with the organiser).
 5. With `prithvifc.ca` active as a zone in the same Cloudflare account, `pnpm build && npx wrangler deploy` creates the Worker and attaches it to the custom domain declared in `wrangler.jsonc` `routes`. The `workers.dev` URL is disabled.
-6. In Cloudflare Zero Trust, create a self-hosted Access application for `prithvifc.ca` with the paths `winterleague`, `join` and `api`. Leave the rest of the site public. Add an Allow policy for the people who should sign in, for example "Emails" for the roster, or "Everyone" with the One-time PIN login method and let invitations decide who joins. Access's free plan covers 50 users.
+6. In Cloudflare Zero Trust, create a self-hosted Access application for `prithvifc.ca` with the paths `winterleague`, `join` and `api`. Leave the rest of the site public. Turn on the One-time PIN login method, create an Access group of club members' emails, and add an Allow policy for that group. Do not use "Everyone": each person who signs in takes one of the Zero Trust Free plan's 50 seats, so strangers could fill them. When inviting a new player, add their email to the group. Free seats by removing departed users on the Users page.
 7. Copy the application's Audience (AUD) tag and your team URL (`https://<team>.cloudflareaccess.com`) into `wrangler.jsonc` `vars`, then deploy again.
 
 ### Free-tier guardrails
