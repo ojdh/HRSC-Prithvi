@@ -226,7 +226,7 @@ footer{color:var(--muted);font-size:.9rem;margin-top:48px;border-top:1px solid v
   <li><strong>No second address:</strong> <code>workers_dev: false</code> turns off the extra <code>*.workers.dev</code> address, so the site lives at exactly one URL.</li>
   <li><strong>Settings and secrets:</strong> the database ID, Access team URL, AUD tag and R2 limits are plain <code>vars</code>, not secrets. The one secret, <code>CLUB_SETUP_KEY</code>, is set separately with <code>wrangler secret put</code> and never stored in the repo.</li>
 </ul>
-<p><strong>Plan:</strong> Workers Free allows 100,000 requests a day. Past that, requests are refused rather than billed. We haven't yet confirmed in the dashboard that the account is on the Free plan.</p>
+<p><strong>Plan:</strong> Workers Free allows 100,000 requests a day. Past that, requests are refused rather than billed. On 2 October 2026 the account owner checked Workers &amp; Pages &rarr; Plans in the dashboard and confirmed there is no paid Workers plan, so the account is on Workers Free. This was a dashboard check, not an API check.</p>
 
 <h3 id="detail-domain">5. The domain</h3>
 <p><code>prithvifc.ca</code> is a zone on the club's Cloudflare account. It's on the Free plan, uses Cloudflare's nameservers, and its status is active (checked through the Cloudflare API). The domain needs to be on the same account so the Worker can claim it as a custom domain and Access can protect paths on it.</p>
@@ -358,7 +358,7 @@ footer{color:var(--muted);font-size:.9rem;margin-top:48px;border-top:1px solid v
   <li class="ok">Ran the Deploy workflow. No migrations were pending, the Worker was uploaded, and <code>prithvifc.ca</code> was attached as its custom domain.</li>
   <li class="ok">Set <code>CLUB_SETUP_KEY</code> as a Worker secret. The only other copy is a private file for the organiser.</li>
   <li class="ok">Checked the live site: the homepage returns 200 without sign-in; <code>/winterleague</code>, <code>/join</code> and <code>/api/*</code> redirect to the Access sign-in; the <code>workers.dev</code> address is disabled.</li>
-  <li class="ok">Confirmed Workers has no paid plan, so the account is on Workers Free.</li>
+  <li class="ok">The account owner confirmed in the dashboard (Workers &amp; Pages &rarr; Plans) that there is no paid Workers plan, so the account is on Workers Free.</li>
 </ul>
 <p><strong>Still to do:</strong></p>
 <ul>
