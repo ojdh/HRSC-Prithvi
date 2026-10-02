@@ -36,7 +36,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Refuse unprovisioned configuration
         run: |
-          if grep -n "REPLACE_WITH_" wrangler.jsonc; then
+          if grep -v '^[[:space:]]*//' wrangler.jsonc | grep -n 'REPLACE_WITH_'; then
             echo "wrangler.jsonc still has placeholders; see README 'Deploying to Cloudflare'." >&2
             exit 1
           fi
