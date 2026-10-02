@@ -26,7 +26,7 @@ Run `pnpm build`, then `node --import ./scripts/sites-env.mjs tests/club-integra
 
 ## Sign-in
 
-Cloudflare Access protects the whole site and forwards a signed JWT (`Cf-Access-Jwt-Assertion`) with every request. `app/auth.ts` verifies its RS256 signature against the team's published keys and checks the issuer, audience and expiry; no other identity header is trusted. The player's identity is the token's `sub`, so a person must sign in with the same email each time. Missing `CF_ACCESS_TEAM_URL` or `CF_ACCESS_AUD` fails closed.
+Cloudflare Access protects the member paths (`/winterleague`, `/join`, `/api/`) and forwards a signed JWT (`Cf-Access-Jwt-Assertion`) with every request to them. The homepage, static assets and the web app manifest stay public. `app/auth.ts` verifies its RS256 signature against the team's published keys and checks the issuer, audience and expiry; no other identity header is trusted. The player's identity is the token's `sub`, so a person must sign in with the same email each time. Missing `CF_ACCESS_TEAM_URL` or `CF_ACCESS_AUD` fails closed.
 
 ## Local development
 
@@ -47,8 +47,8 @@ One-time setup, from a shell logged in with `npx wrangler login`:
 2. `npx wrangler r2 bucket create hrsc-prithvi-media`.
 3. `npx wrangler d1 migrations apply DB --remote --config wrangler.jsonc`.
 4. `npx wrangler secret put CLUB_SETUP_KEY` (choose a long random value; share it only with the organiser).
-5. `pnpm build && npx wrangler deploy` to create the Worker, then attach a custom domain or use its `workers.dev` URL.
-6. In Cloudflare Zero Trust, create a self-hosted Access application for that hostname (the whole site). Add an Allow policy for the people who should sign in, for example "Emails" for the roster, or "Everyone" with the One-time PIN login method and let invitations decide who joins. Access's free plan covers 50 users.
+5. With `prithvifc.ca` active as a zone in the same Cloudflare account, `pnpm build && npx wrangler deploy` creates the Worker and attaches it to the custom domain declared in `wrangler.jsonc` `routes`. The `workers.dev` URL is disabled.
+6. In Cloudflare Zero Trust, create a self-hosted Access application for `prithvifc.ca` with the paths `winterleague`, `join` and `api`. Leave the rest of the site public. Add an Allow policy for the people who should sign in, for example "Emails" for the roster, or "Everyone" with the One-time PIN login method and let invitations decide who joins. Access's free plan covers 50 users.
 7. Copy the application's Audience (AUD) tag and your team URL (`https://<team>.cloudflareaccess.com`) into `wrangler.jsonc` `vars`, then deploy again.
 
 Afterwards, run the Deploy workflow in GitHub Actions (`.github/workflows/deploy.yml`). It needs the repository secrets `CLOUDFLARE_API_TOKEN` (Workers Scripts, D1 and R2 edit) and `CLOUDFLARE_ACCOUNT_ID`. It refuses to deploy while any `REPLACE_WITH_` placeholder remains.

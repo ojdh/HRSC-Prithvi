@@ -35,8 +35,8 @@ export async function getUser(): Promise<ClubUser | null> {
   return { userId: claims.sub, email: claims.email, displayName: claims.email };
 }
 
-// Access protects the whole site, so navigating to any page starts sign-in
-// when the session has lapsed.
+// Access protects the member paths (/winterleague, /join, /api/), so
+// navigating to one starts sign-in when the session has lapsed.
 export function signInPath(returnTo: string): string {
   return safeRelativeReturnPath(returnTo);
 }
