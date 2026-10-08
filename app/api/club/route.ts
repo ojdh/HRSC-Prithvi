@@ -1,8 +1,8 @@
 import { env } from 'cloudflare:workers';
 import { z } from 'zod';
 import { getUser } from '../../auth';
-import { TEAMS,nextMatch,result,type Club,type Day } from '@/lib/club';
-import { db,readClub,saveClub,check,digest,token,ClubError } from '@/lib/server-club';
+import { TEAMS,nextMatch,result,emptyClub,type Club,type Day } from '@/lib/club';
+import { db,readClub,saveClub,check,digest,token,role,ClubError } from '@/lib/server-club';
 import {pendingInvite,findInvitation,inviteCookie} from '@/lib/server-invitations';
 export const dynamic='force-dynamic';
 const team=z.enum(TEAMS),id=z.string().min(1).max(100);
@@ -11,11 +11,11 @@ function response(value:unknown,status=200){return Response.json(value,{status,h
 function fail(e:unknown){if(e instanceof ClubError)return response({error:e.message},e.status);if(e instanceof z.ZodError)return response({error:e.issues[0].message},400);console.error('Club request failed',e instanceof Error?e.message:'unknown');return response({error:'We could not save or load that. Please retry; your form is still here.'},503);}
 export async function GET(req:Request){try{
   const user=await getUser();const stored=await readClub();
-  if(!stored)return response({players:[],days:[],revision:0,initialized:false,isAdmin:false,me:null,polls:{}});
+  if(!stored)return response(emptyClub);
   const invited=await findInvitation(stored.club,pendingInvite(req));const invitation=invited&&!invited.userId?{name:invited.name,team:invited.team}:undefined;
-  if(!user)return response({players:[],days:[],revision:0,initialized:true,isAdmin:false,me:null,polls:{},invitation});
-  const {club,revision}=stored;const me=club.players.find(p=>p.userId===user.userId);
-  if(!me&&club.adminId!==user.userId)return response({players:[],days:[],revision,initialized:true,isAdmin:false,me:null,polls:{},invitation});
+  if(!user)return response({...emptyClub,initialized:true,invitation});
+  const {club,revision}=stored;const {me,owner,admin}=role(club,user.userId);
+  if(!me&&!owner)return response({...emptyClub,revision,initialized:true,invitation});
   const polls:Record<string,unknown>={};
   const counts=(await db().prepare('SELECT day,COUNT(*) AS n FROM vote_receipts GROUP BY day').all<{day:string;n:number}>()).results;
   const mine=me?(await db().prepare('SELECT day FROM vote_receipts WHERE player=?').bind(me.id).all<{day:string}>()).results:[];
@@ -24,7 +24,7 @@ export async function GET(req:Request){try{
     const tally=day.poll==='closed'?tallies.filter(t=>t.day===day.id).map(({candidate,votes})=>({candidate,votes})):[];
     polls[day.id]={count:counts.find(x=>x.day===day.id)?.n??0,voted:mine.some(x=>x.day===day.id),tally};
   }
-  return response({initialized:true,revision,isAdmin:club.adminId===user.userId,me:me?.id??null,players:club.players.map(({userId,inviteHash,legacyInviteHash,inviteToken,...p})=>({...p,linked:!!userId})),days:club.days,polls});
+  return response({initialized:true,revision,isAdmin:admin,isOwner:owner,owner:club.players.find(p=>p.userId===club.adminId)?.id??null,admins:club.admins,me:me?.id??null,players:club.players.map(({userId,inviteHash,legacyInviteHash,inviteToken,...p})=>({...p,linked:!!userId})),days:club.days,polls});
 }catch(e){return fail(e);}}
 export async function POST(req:Request){try{
   const origin=req.headers.get('origin');check(!origin||origin===new URL(req.url).origin,'This request must come from the club website.',403);
@@ -36,12 +36,12 @@ export async function POST(req:Request){try{
     const setup=z.object({key:z.string(),name:z.string().trim().min(1).max(60),team}).parse(body);
     const secret=(env as unknown as Record<string,string>).CLUB_SETUP_KEY;
     check(secret&&await digest(setup.key)===await digest(secret),'Enter the organiser setup code supplied with your site.',403);
-    const c:Club={adminId:user.userId,players:[{id:crypto.randomUUID(),name:setup.name,team:setup.team,userId:user.userId,age:null,height:null,district:null,position:'All-rounder',number:null,photo:null}],days:[]};
+    const c:Club={adminId:user.userId,admins:[],players:[{id:crypto.randomUUID(),name:setup.name,team:setup.team,userId:user.userId,age:null,height:null,district:null,position:'All-rounder',number:null,photo:null}],days:[]};
     const r=await db().prepare('INSERT OR IGNORE INTO club (id,revision,data) VALUES (1,0,?)').bind(JSON.stringify(c)).run();
     check(r.meta.changes===1,'The club has already been set up.',409);return response({ok:true});
   }
   check(stored,'The organiser needs to set up the club first.');const {club,revision}=stored;
-  const me=club.players.find(p=>p.userId===user.userId),admin=club.adminId===user.userId;
+  const {me,owner,admin}=role(club,user.userId);
   if(action==='vote'){
     const input=z.object({dayId:id,candidate:id}).parse(body);const day=club.days.find(d=>d.id===input.dayId);check(day&&day.poll==='open','Voting is not open for this match day.');
     const voter=day.roster.find(p=>p.id===me?.id),candidate=day.roster.find(p=>p.id===input.candidate);
@@ -65,8 +65,14 @@ export async function POST(req:Request){try{
     const allowed=new Set(['action','revision','name','age','height','district','position']);
     check(Object.keys(body).every(key=>allowed.has(key)),'You can only update your own personal information.',403);
     Object.assign(me,details.parse(body));
+  }else if(action==='setAdmin'){
+    check(owner,'Only the club owner can change admins.',403);
+    const input=z.object({playerId:id,admin:z.boolean()}).parse(body);const p=club.players.find(p=>p.id===input.playerId&&p.active!==false);check(p,'Active player not found.');
+    check(p.userId!==club.adminId,'The owner is always an admin.');check(p.userId,'This player needs to accept their invitation before becoming an admin.');
+    check(club.admins.includes(p.id)!==input.admin,input.admin?'This player is already an admin.':'This player is not an admin.');
+    if(input.admin){check(club.admins.length<10,'The club supports up to 10 admins.');club.admins.push(p.id);}else club.admins=club.admins.filter(a=>a!==p.id);
   }else{
-    check(admin,'Only the organiser can change match records and teams.',403);
+    check(admin,'Only club admins can change match records and teams.',403);
     if(action==='addPlayer'){
       const input=details.extend({team}).parse(body);check(club.players.length<150,'The club supports up to 150 players.');
       club.players.push({...input,id:crypto.randomUUID(),active:true,photo:null});
@@ -75,9 +81,9 @@ export async function POST(req:Request){try{
     }else if(action==='archivePlayer'||action==='restorePlayer'){
       const playerId=id.parse(body.playerId);const p=club.players.find(p=>p.id===playerId);check(p,'Player not found.');check(p.userId!==club.adminId,'The organiser cannot remove their own profile.');
       if(action==='archivePlayer'){
-        check(p.active!==false,'This player has already been removed.');
+        check(p.active!==false,'This player has already been removed.');check(owner||!club.admins.includes(p.id),'Only the club owner can remove an admin.',403);
         check(!club.days.some(d=>d.poll==='open'&&d.roster.some(r=>r.id===p.id)),'Close voting for this player’s match day before removing them.');
-        p.active=false;
+        p.active=false;club.admins=club.admins.filter(a=>a!==p.id);
       }else{check(p.active===false,'This player is already on the active roster.');p.active=true;}
     }else if(action==='invite'){
       const p=club.players.find(p=>p.id===body.playerId&&p.active!==false);check(p,'Active player not found.');check(!p.userId,'This player already has an account.');

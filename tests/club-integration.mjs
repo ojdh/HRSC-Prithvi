@@ -28,8 +28,8 @@ async function get(user='owner'){const r=await mf.dispatchFetch(origin+'/api/clu
 async function post(action,body={},user='owner',revision){const v=revision??(await get(user)).data.revision;const r=await mf.dispatchFetch(origin+'/api/club',{method:'POST',headers:await headers(user),body:JSON.stringify({action,revision:v,...body})});return {status:r.status,data:await r.json()}}
 async function success(action,body={},user='owner'){const r=await post(action,body,user);assert.equal(r.status,200,JSON.stringify(r));checks++;return r.data}
 try{
-  const migrations=await Promise.all((await readdir('drizzle')).filter(f=>f.endsWith('.sql')).sort().map(f=>readFile('drizzle/'+f,'utf8')));
-  async function migrate(instance){const db=await instance.getD1Database('DB');for(const sql of migrations)for(const statement of sql.split('--> statement-breakpoint').filter(x=>x.trim()))await db.prepare(statement).run();}
+  const migrations=await Promise.all((await readdir('drizzle')).filter(f=>f.endsWith('.sql')).sort().map(async f=>({file:f,sql:await readFile('drizzle/'+f,'utf8')})));
+  async function migrate(instance,include=()=>true){const db=await instance.getD1Database('DB');for(const {file,sql} of migrations.filter(m=>include(m.file)))for(const statement of sql.split('--> statement-breakpoint').filter(x=>x.trim()))await db.prepare(statement).run();}
   await migrate(mf);
   ok((await get(null)).data.initialized===false,'clean club');
   // Identity comes only from a valid Access token; anything else is anonymous.
@@ -144,6 +144,31 @@ try{
   ok((await post('vote',{dayId,candidate:black.id},'red-user')).status===400,'archived player cannot vote');
   await success('restorePlayer',{playerId:red.id});
   ok((await get('red-user')).data.me===red.id,'restored player keeps account');
+  // Admins: only the owner grants or removes admin rights.
+  ok((await post('setAdmin',{playerId:white.id,admin:true},'black-user')).status===403,'players cannot grant admin');
+  await success('setAdmin',{playerId:white.id,admin:true});
+  const whiteView=(await get('white-user')).data;ok(whiteView.isAdmin&&!whiteView.isOwner&&whiteView.owner===owner.id&&whiteView.admins.includes(white.id),'promoted admin sees admin role');
+  await success('addPlayer',{...fields,name:'Admin signing',team:'white'},'white-user');
+  const signing=(await get()).data.players.find(p=>p.name==='Admin signing');
+  ok((await post('setAdmin',{playerId:signing.id,admin:true})).status===400,'unlinked players cannot be admins');
+  await success('setMatchVideo',{dayId,videoUrl:'https://youtu.be/dQw4w9WgXcQ'},'white-user');
+  ok((await videoUpload('white-user',{target:'profile',playerId:black.id,kind:'Save'})).status===200,'admin posts player highlight');
+  const adminClip=(await get()).data.players.find(p=>p.id===black.id).highlights.at(-1).key;
+  ok((await mf.dispatchFetch(origin+'/api/video?key='+encodeURIComponent(adminClip),{method:'DELETE',headers:await headers('white-user')})).status===200,'admin removes highlight');
+  ok((await post('setAdmin',{playerId:black.id,admin:true},'white-user')).status===403,'admins cannot grant admin');
+  ok((await post('setAdmin',{playerId:owner.id,admin:false},'white-user')).status===403,'admins cannot demote the owner');
+  ok((await post('setAdmin',{playerId:owner.id,admin:false})).status===400,'owner always stays an admin');
+  ok((await post('setAdmin',{playerId:white.id,admin:true})).status===400,'admin change must change something');
+  await success('setAdmin',{playerId:black.id,admin:true});
+  ok((await post('archivePlayer',{playerId:black.id},'white-user')).status===403,'admins cannot remove another admin');
+  ok((await post('setAdmin',{playerId:black.id,admin:false},'owner',(await get()).data.revision-1)).status===409,'stale admin change rejected');
+  await success('setAdmin',{playerId:black.id,admin:false});
+  ok(!(await get('black-user')).data.isAdmin,'owner demotes admin');
+  await success('archivePlayer',{playerId:white.id});
+  ok(!(await get()).data.admins.includes(white.id),'removing a player drops admin rights');
+  await success('restorePlayer',{playerId:white.id});
+  ok(!(await get('white-user')).data.isAdmin,'restored player is not an admin again');
+  ok((await post('addPlayer',{...fields,name:'Too late',team:'red'},'white-user')).status===403,'former admin cannot change records');
   const stale=state.revision;
   ok((await post('editPlayer',{...fields,...red,name:'Wrong overwrite'},'owner',stale)).status===409,'stale updates rejected');
   state=(await get()).data;ok(!JSON.stringify(state).includes('userId')&&!JSON.stringify(state).includes('inviteHash'),'private identity and invitation hashes not disclosed');
@@ -194,5 +219,16 @@ try{
     ok((await send(unbudgeted,'/api/photo','owner',{photo:photoFile()})).status===503,'missing R2 budget configuration fails closed');
     ok(await storedObjects(unbudgeted)===0,'unbudgeted upload stores nothing');
   }finally{await unbudgeted.dispose()}
+  // Data migrations upgrade a club saved before them.
+  const oldClub=new Miniflare({...workerOptions,bindings:accessBindings});
+  try{
+    await migrate(oldClub,f=>f<'0004');
+    await (await oldClub.getD1Database('DB')).prepare('INSERT INTO club (id,revision,data) VALUES (1,0,?)').bind(JSON.stringify({adminId:'owner',players:[{id:'legacy-owner',name:'Organiser',team:'red',userId:'owner',age:null,height:null,district:null,position:'All-rounder',photo:null}],days:[]})).run();
+    await migrate(oldClub,f=>f>='0004');
+    const view=await (await oldClub.dispatchFetch(origin+'/api/club',{headers:await headers('owner')})).json();
+    ok(view.isOwner&&view.isAdmin&&view.owner==='legacy-owner'&&Array.isArray(view.admins)&&view.admins.length===0,'oldClub club gains an empty admin list');
+    const added=await oldClub.dispatchFetch(origin+'/api/club',{method:'POST',headers:await headers('owner'),body:JSON.stringify({action:'addPlayer',revision:view.revision,...fields,name:'New signing',team:'black'})});
+    ok(added.status===200,'owner keeps admin rights after migration');
+  }finally{await oldClub.dispose()}
   console.log(JSON.stringify({passed:checks,productionDataTouched:false}));
 }finally{await mf.dispose()}
