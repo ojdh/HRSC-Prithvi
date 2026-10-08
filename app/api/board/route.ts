@@ -3,6 +3,7 @@ import { BOARD_LIMITS, BOARD_REACTIONS, type BoardReaction } from '@/lib/club';
 import { ClubError, check, db } from '@/lib/server-club';
 import { deleteObject, putObject } from '@/lib/r2-budget';
 import { readImage, type UploadedImage } from '@/lib/server-images';
+import { readForm } from '@/lib/server-forms';
 import { PHOTO_LIMIT_BYTES } from '@/lib/photo-compression';
 import { boardPage, boardViewer, findComment, findPost, logRemoval, openTeam, reactionTeam } from '@/lib/server-board';
 export const dynamic = 'force-dynamic';
@@ -25,10 +26,9 @@ export async function POST(req: Request) {
   try {
     check(req.headers.get('origin') === new URL(req.url).origin, 'This request must come from the club website.', 403);
     const viewer = await boardViewer(await getUser());
-    check((Number(req.headers.get('content-length')) || 0) < MAX_REQUEST_BYTES, 'Choose up to 4 photos of 2 MB or less.');
     const me = viewer.me;
     check(me, 'Connect your player profile before using the team board.', 403);
-    const form = await req.formData(), action = form.get('action');
+    const form = await readForm(req, MAX_REQUEST_BYTES, 'Choose up to 4 photos of 2 MB or less.'), action = form.get('action');
     const store = async (images: UploadedImage[]) => {
       for (const image of images) {
         const key = 'board/' + crypto.randomUUID();

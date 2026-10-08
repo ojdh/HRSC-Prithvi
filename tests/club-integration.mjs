@@ -615,6 +615,13 @@ try{
     ok((await boardSend('board-red',{action:'createPost',team:'red',body:'   '})).status===400,'a post needs text');
     ok((await boardSend('board-red',{action:'createPost',team:'red',body:'x'.repeat(2001)})).status===400,'posts are capped at 2000 characters');
     ok(await storedObjects(boards)===objectsBefore&&await rows('board_posts')===postsBefore,'refused posts store nothing');
+    // The body limit holds while the body is read, so a request that declares no length cannot bypass it.
+    const oversized={action:'createPost',team:'red',body:'x'.repeat(9_000_000)};
+    async function streamedSend(user,values){const f=new FormData();for(const [k,v] of Object.entries(values))f.append(k,v);const req=new Request(origin+'/api/board',{method:'POST',body:f});const bytes=new Uint8Array(await req.arrayBuffer());
+      const body=new ReadableStream({start(controller){for(let i=0;i<bytes.length;i+=65536)controller.enqueue(bytes.slice(i,i+65536));controller.close()}});
+      return (await boards.dispatchFetch(req.url,{method:'POST',headers:{Origin:origin,'Cf-Access-Jwt-Assertion':await accessToken(user),'Content-Type':req.headers.get('content-type')},body,duplex:'half'})).status}
+    ok(await streamedSend('board-red',oversized)===413,'an oversized board request without a declared length is refused while it is read');
+    ok(await rows('board_posts')===postsBefore,'oversized requests store nothing');
     // Comments and reactions
     ok((await boardSend('board-red2',{action:'comment',postId:post.id,body:'On my way',images:photoFile()})).status===200,'teammate comments with a photo');
     let fresh=(await readBoard('board-red','red')).data.posts[0];const comment=fresh.comments[0];
