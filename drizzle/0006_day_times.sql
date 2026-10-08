@@ -1,0 +1,2 @@
+-- Match days gain start and end times; existing days were all 7:00–8:30 AM sessions.
+UPDATE club SET data=json_set(data,'$.days',json(COALESCE((SELECT json_group_array(json(CASE WHEN json_type(value,'$.start') IS NULL THEN json_set(value,'$.start','07:00','$.end','08:30') ELSE value END)) FROM json_each(club.data,'$.days')),'[]'))),revision=revision+1 WHERE id=1 AND EXISTS (SELECT 1 FROM json_each(club.data,'$.days') WHERE json_type(value,'$.start') IS NULL);

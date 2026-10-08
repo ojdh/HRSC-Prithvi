@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prithvi FC on Cloudflare</title>
+<meta name="description" content="Why and how the Prithvi FC website moved from ChatGPT Sites to its own Cloudflare account, in three levels of detail.">
+<style>
+:root{
+  --bg:#f6f7f4;--surface:#ffffff;--ink:#1c2a22;--muted:#5b6b61;--line:#d9dfd9;
+  --accent:#1f6b45;--accent-soft:#e3f1e8;--warn:#9a5b00;--warn-soft:#fbf0dc;
+  --bad:#a3322a;--bad-soft:#fbe6e3;--code:#eef1ec;
+  --font:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#121a15;--surface:#1a241e;--ink:#e6ede8;--muted:#9fb0a5;--line:#2f3d34;
+  --accent:#6fcf97;--accent-soft:#1f3328;--warn:#f0b35a;--warn-soft:#3a2d17;
+  --bad:#f08a80;--bad-soft:#3b201d;--code:#223028;
+}}
+:root[data-theme="dark"]{
+  --bg:#121a15;--surface:#1a241e;--ink:#e6ede8;--muted:#9fb0a5;--line:#2f3d34;
+  --accent:#6fcf97;--accent-soft:#1f3328;--warn:#f0b35a;--warn-soft:#3a2d17;
+  --bad:#f08a80;--bad-soft:#3b201d;--code:#223028;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 var(--font)}
+main{max-width:860px;margin:0 auto;padding:32px 16px 64px}
+h1{font-size:2rem;line-height:1.2;margin:0 0 8px}
+h2{font-size:1.4rem;margin:40px 0 12px;padding-top:8px;border-top:1px solid var(--line)}
+h3{font-size:1.1rem;margin:28px 0 8px}
+p,li{max-width:72ch}
+a{color:var(--accent)}
+code{font-family:var(--mono);font-size:.88em;background:var(--code);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+.lede{color:var(--muted);margin:0 0 20px}
+.status{background:var(--warn-soft);border-left:4px solid var(--warn);padding:12px 16px;border-radius:6px;margin:16px 0 24px}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:24px 0 8px;position:sticky;top:0;background:var(--bg);padding:8px 0;z-index:1}
+.tabs a{display:inline-block;padding:8px 16px;border:1px solid var(--line);border-radius:999px;text-decoration:none;color:var(--ink);background:var(--surface);font-weight:600}
+.tabs a:hover{border-color:var(--accent)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 20px;margin:16px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.grid .card{margin:0}
+.card h3{margin-top:0}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:.95rem}
+.table-wrap{overflow-x:auto}
+th,td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600}
+td code{white-space:nowrap}
+.ok{color:var(--accent);font-weight:600}
+.todo{color:var(--warn);font-weight:600}
+figure{margin:20px 0}
+figure svg{width:100%;height:auto;display:block}
+figcaption{color:var(--muted);font-size:.9rem;margin-top:6px}
+.svg-box{fill:var(--surface);stroke:var(--line);stroke-width:1.5}
+.svg-accent{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5}
+.svg-warn{fill:var(--warn-soft);stroke:var(--warn);stroke-width:1.5}
+.svg-bad{fill:var(--bad-soft);stroke:var(--bad);stroke-width:1.5}
+.svg-text{fill:var(--ink);font:600 14px var(--font)}
+.svg-small{fill:var(--muted);font:12px var(--font)}
+.svg-line{stroke:var(--muted);stroke-width:1.5;fill:none}
+.svg-arrow{fill:var(--muted)}
+.svg-dash{stroke:var(--muted);stroke-width:1.5;fill:none;stroke-dasharray:5 4}
+details{border:1px solid var(--line);border-radius:8px;padding:8px 14px;margin:10px 0;background:var(--surface)}
+summary{cursor:pointer;font-weight:600}
+footer{color:var(--muted);font-size:.9rem;margin-top:48px;border-top:1px solid var(--line);padding-top:16px}
+</style>
+</head>
+<body>
+<main>
+
+<h1>Prithvi FC on Cloudflare</h1>
+<p class="lede">How the club website moved from ChatGPT Sites to its own Cloudflare account at <code>prithvifc.ca</code>, why each piece exists, and how it was set up. The page is written at three levels of detail.</p>
+
+<div class="status"><strong>Status, 2 October 2026:</strong> The site is live on Cloudflare at <a href="https://prithvifc.ca">prithvifc.ca</a>. The homepage is public, and <code>/winterleague</code>, <code>/join</code> and <code>/api</code> ask for an emailed sign-in code. Next, the organiser signs in, enters the setup key and sets up the club again. The <a href="#detail-pending">to-do list</a> shows what's left.</div>
+
+<nav class="tabs" aria-label="Versions">
+  <a href="#summary">Summary</a>
+  <a href="#eli5">ELI5</a>
+  <a href="#detail">Full detail</a>
+</nav>
+
+<!-- ================================================================ -->
+<h2 id="summary">Summary</h2>
+
+<ul>
+  <li><strong>What moved:</strong> the website, its database and its photo and video storage. They used to run on ChatGPT Sites. Now they run on the club's own Cloudflare account under <code>prithvifc.ca</code>.</li>
+  <li><strong>Why:</strong>
+    <ul>
+      <li>We wanted our own domain and our own data.</li>
+      <li>We wanted deploys straight from GitHub.</li>
+      <li>We wanted players to sign in with email instead of needing a ChatGPT account.</li>
+      <li>Moving closes a security hole. The old sign-in trusted headers that only ChatGPT's servers set safely, and anywhere else they could be faked.</li>
+    </ul>
+  </li>
+  <li><strong>Who can see what:</strong> the homepage is public. The Winter league, invitations and the API need a sign-in by emailed code, and only emails in the "Club members" group can sign in.</li>
+  <li><strong>Cost:</strong> $0. Every Cloudflare service is on its free plan. R2 storage is the only one that would bill past its free allowance, so the app enforces its own limits, set below that allowance.</li>
+  <li><strong>Deploys:</strong> from the <code>main</code> branch of <a href="https://github.com/ojdh/HRSC-Prithvi">ojdh/HRSC-Prithvi</a>, by starting the Deploy workflow by hand in GitHub Actions.</li>
+  <li><strong>Data:</strong> starts fresh. Players and media from the old site weren't copied over. Importing them later is possible but hasn't been decided.</li>
+</ul>
+
+<div class="table-wrap"><table>
+  <thead><tr><th>Piece</th><th>Cloudflare service</th><th>Plan</th><th>Status</th></tr></thead>
+  <tbody>
+    <tr><td>Domain <code>prithvifc.ca</code></td><td>DNS (zone)</td><td>Free</td><td class="ok">Active</td></tr>
+    <tr><td>Website and API</td><td>Workers <code>hrsc-prithvi</code></td><td>Free</td><td class="ok">Live on <code>prithvifc.ca</code>; <code>workers.dev</code> address off</td></tr>
+    <tr><td>Club database</td><td>D1 <code>hrsc-prithvi</code></td><td>Free</td><td class="ok">Created, migrations applied</td></tr>
+    <tr><td>Photos and video clips</td><td>R2 <code>hrsc-prithvi-media</code></td><td>Free tier, app-enforced limits</td><td class="ok">Created, empty</td></tr>
+    <tr><td>Member sign-in</td><td>Zero Trust Access</td><td>Free (50 seats)</td><td class="ok">Application and policy set up</td></tr>
+  </tbody>
+</table></div>
+
+<!-- ================================================================ -->
+<h2 id="eli5">ELI5: explain it like I'm five</h2>
+
+<p>Think of the website as the club's <strong>clubhouse</strong>.</p>
+
+<div class="grid">
+  <div class="card"><h3>Cloudflare is the building</h3><p>We used to rent a room in someone else's building (ChatGPT Sites). Now the club has its own building with its own street address, <code>prithvifc.ca</code>, and we hold the keys.</p></div>
+  <div class="card"><h3>The front lobby is open</h3><p>Anyone can walk into the lobby, which is the homepage, and see what the club is about.</p></div>
+  <div class="card"><h3>Access is the doorman</h3><p>To go past the lobby into the league rooms, the doorman checks your name against a guest list (the "Club members" group). If you're on it, he emails you a one-time code. You type it in and you're in. You don't need to remember a password.</p></div>
+  <div class="card"><h3>D1 is the filing cabinet</h3><p>It holds the roster, match results and votes.</p></div>
+  <div class="card"><h3>R2 is the storage locker with a meter</h3><p>Photos and video clips go here. The locker is free up to a point. Past that, it starts charging.</p></div>
+  <div class="card"><h3>The guardrail stops the meter</h3><p>Before anything goes into or comes out of the locker, the website checks a tally. If the next item would go over the free amount, it says "not this month" instead. Nobody gets a surprise bill.</p></div>
+</div>
+
+<p>Why move at all? In the old building, the receptionist trusted anyone wearing a badge with the right name on it. Outside that building, anyone can print a badge. The new doorman checks a signed pass that can't be faked.</p>
+
+<figure>
+<svg viewBox="0 0 760 230" role="img" aria-labelledby="eli5-title">
+  <title id="eli5-title">A visitor reaches the open lobby directly; the league rooms are behind a doorman who checks the guest list</title>
+  <defs><marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" class="svg-arrow"/></marker></defs>
+  <rect x="10" y="80" width="120" height="60" rx="10" class="svg-box"/><text x="70" y="115" text-anchor="middle" class="svg-text">Visitor</text>
+  <rect x="200" y="20" width="170" height="60" rx="10" class="svg-accent"/><text x="285" y="47" text-anchor="middle" class="svg-text">Lobby (homepage)</text><text x="285" y="66" text-anchor="middle" class="svg-small">open to everyone</text>
+  <rect x="200" y="140" width="170" height="60" rx="10" class="svg-warn"/><text x="285" y="167" text-anchor="middle" class="svg-text">Doorman (Access)</text><text x="285" y="186" text-anchor="middle" class="svg-small">guest list + emailed code</text>
+  <rect x="440" y="140" width="150" height="60" rx="10" class="svg-box"/><text x="515" y="167" text-anchor="middle" class="svg-text">League rooms</text><text x="515" y="186" text-anchor="middle" class="svg-small">the website app</text>
+  <rect x="640" y="90" width="110" height="50" rx="10" class="svg-box"/><text x="695" y="120" text-anchor="middle" class="svg-text">Filing cabinet</text>
+  <rect x="640" y="165" width="110" height="50" rx="10" class="svg-warn"/><text x="695" y="187" text-anchor="middle" class="svg-text">Locker</text><text x="695" y="204" text-anchor="middle" class="svg-small">with a meter</text>
+  <path d="M130,100 L200,55" class="svg-line" marker-end="url(#a1)"/>
+  <path d="M130,120 L200,165" class="svg-line" marker-end="url(#a1)"/>
+  <path d="M370,170 L440,170" class="svg-line" marker-end="url(#a1)"/>
+  <path d="M590,160 L640,118" class="svg-line" marker-end="url(#a1)"/>
+  <path d="M590,180 L640,188" class="svg-line" marker-end="url(#a1)"/>
+</svg>
+<figcaption>The lobby is open. Everything else goes past the doorman first.</figcaption>
+</figure>
+
+<!-- ================================================================ -->
+<h2 id="detail">Full detail</h2>
+
+<h3 id="detail-why">1. Why leave ChatGPT Sites</h3>
+<p>The site was built and hosted on ChatGPT Sites. That platform supplied three things:</p>
+<ul>
+  <li>the database (a D1 binding called <code>DB</code>)</li>
+  <li>file storage (an R2 binding called <code>BUCKET</code>)</li>
+  <li>sign-in: its edge added <code>oai-authenticated-user-*</code> headers to each request, and the app read the user from those headers</li>
+</ul>
+<p>Four reasons to move:</p>
+<ul>
+  <li><strong>Security.</strong> Those headers are only trustworthy when ChatGPT's own servers set them. Anywhere else, anyone could send <code>oai-authenticated-user-id: &lt;organiser&gt;</code> and act as the organiser. The app had to stop trusting them before it could run anywhere else.</li>
+  <li><strong>Ownership.</strong> We wanted our own domain, a database we can export, and deploys from GitHub.</li>
+  <li><strong>Sign-in.</strong> Players shouldn't need a ChatGPT account. An emailed code works for everyone.</li>
+  <li><strong>Cost control.</strong> On our own account, we set the limits ourselves.</li>
+</ul>
+
+<h3 id="detail-architecture">2. How a request flows now</h3>
+<figure>
+<svg viewBox="0 0 760 330" role="img" aria-labelledby="arch-title">
+  <title id="arch-title">Request flow: browser to Cloudflare edge; member paths go through Access first; the Worker verifies the token and reads D1 and R2 through the budget module</title>
+  <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" class="svg-arrow"/></marker></defs>
+  <rect x="10" y="135" width="110" height="60" rx="10" class="svg-box"/><text x="65" y="162" text-anchor="middle" class="svg-text">Browser</text><text x="65" y="180" text-anchor="middle" class="svg-small">prithvifc.ca</text>
+  <rect x="170" y="25" width="190" height="70" rx="10" class="svg-accent"/><text x="265" y="53" text-anchor="middle" class="svg-text">Public paths</text><text x="265" y="72" text-anchor="middle" class="svg-small">/ , static files, manifest</text>
+  <rect x="170" y="210" width="190" height="90" rx="10" class="svg-warn"/><text x="265" y="238" text-anchor="middle" class="svg-text">Cloudflare Access</text><text x="265" y="257" text-anchor="middle" class="svg-small">/winterleague /join /api</text><text x="265" y="275" text-anchor="middle" class="svg-small">group check + emailed PIN</text><text x="265" y="292" text-anchor="middle" class="svg-small">adds signed JWT</text>
+  <rect x="410" y="110" width="170" height="110" rx="10" class="svg-box"/><text x="495" y="138" text-anchor="middle" class="svg-text">Worker</text><text x="495" y="158" text-anchor="middle" class="svg-small">hrsc-prithvi</text><text x="495" y="178" text-anchor="middle" class="svg-small">verifies JWT (app/auth.ts)</text><text x="495" y="198" text-anchor="middle" class="svg-small">serves pages + API</text>
+  <rect x="620" y="50" width="130" height="60" rx="10" class="svg-box"/><text x="685" y="77" text-anchor="middle" class="svg-text">D1</text><text x="685" y="95" text-anchor="middle" class="svg-small">hrsc-prithvi</text>
+  <rect x="620" y="150" width="130" height="70" rx="10" class="svg-warn"/><text x="685" y="175" text-anchor="middle" class="svg-text">r2-budget.ts</text><text x="685" y="194" text-anchor="middle" class="svg-small">charges ledger in D1</text><text x="685" y="210" text-anchor="middle" class="svg-small">then calls R2</text>
+  <rect x="620" y="250" width="130" height="60" rx="10" class="svg-box"/><text x="685" y="277" text-anchor="middle" class="svg-text">R2</text><text x="685" y="295" text-anchor="middle" class="svg-small">hrsc-prithvi-media</text>
+  <path d="M120,150 L170,70" class="svg-line" marker-end="url(#a2)"/>
+  <path d="M120,180 L170,245" class="svg-line" marker-end="url(#a2)"/>
+  <path d="M360,60 L410,135" class="svg-line" marker-end="url(#a2)"/>
+  <path d="M360,250 L410,195" class="svg-line" marker-end="url(#a2)"/>
+  <path d="M580,140 L620,85" class="svg-line" marker-end="url(#a2)"/>
+  <path d="M580,180 L620,185" class="svg-line" marker-end="url(#a2)"/>
+  <path d="M685,220 L685,250" class="svg-line" marker-end="url(#a2)"/>
+  <path d="M640,150 L640,110" class="svg-dash" marker-end="url(#a2)"/>
+</svg>
+<figcaption>Public pages never touch Access. Member paths reach the Worker only with a signed token from Access, and the Worker checks that token itself. Every R2 call goes through the budget module, which records it in D1 first (dashed line).</figcaption>
+</figure>
+
+<h3 id="detail-auth">3. Sign-in: Cloudflare Access instead of ChatGPT headers</h3>
+<p><strong>Why:</strong> Access is Cloudflare's own login gate, it's free for up to 50 users, and it sends the app a token that can't be forged.</p>
+<p><strong>How the app checks the token</strong> (<code>app/auth.ts</code>): Access adds a signed token in the <code>Cf-Access-Jwt-Assertion</code> header. The Worker:</p>
+<ul>
+  <li>checks the token's RS256 signature against the team's public keys at <code>https://&lt;team&gt;.cloudflareaccess.com/cdn-cgi/access/certs</code></li>
+  <li>checks the issuer, the audience (AUD tag), the expiry and the not-before time</li>
+  <li>uses the token's <code>sub</code> as the player's identity</li>
+</ul>
+<p>The old <code>oai-*</code> headers are ignored. If the team URL or AUD tag is missing, every request is refused. The integration test covers each of these cases:</p>
+<ul>
+  <li>forged ChatGPT headers</li>
+  <li>a token signed by a different key</li>
+  <li>the wrong audience</li>
+  <li>the wrong issuer</li>
+  <li>an expired token</li>
+  <li>a malformed token</li>
+  <li>an unsigned token</li>
+  <li>missing configuration</li>
+</ul>
+<p><strong>How Access is set up</strong> (Cloudflare dashboard, Zero Trust):</p>
+<ul>
+  <li><strong>Plan:</strong> Zero Trust Free, which has 50 seats.</li>
+  <li><strong>Login method:</strong> One-time PIN. Cloudflare emails a short code that works once, so nobody needs a password.</li>
+  <li><strong>Rule group "Club members":</strong> an Include rule with the Emails selector, listing each member's email (under Access controls → Policies → Rule groups).</li>
+  <li><strong>Self-hosted application "Prithvi FC members":</strong> protects <code>prithvifc.ca/winterleague</code>, <code>/join</code> and <code>/api</code>. Its policy allows the Club members group.</li>
+</ul>
+<details><summary>Why only three paths are protected, not the whole site</summary>
+<p>The first draft put Access in front of the whole site. That would have hidden the public club homepage behind a login. It would probably also have broken "Add to Home Screen", because browsers fetch the app manifest without the login cookie. The homepage reads no member data, so nothing is gained by protecting it.</p></details>
+<details><summary>Why a member list instead of "Everyone"</summary>
+<p>A seat is taken the first time a person signs in, and it stays taken. With "Everyone", any stranger could request a code and sign in, using up seats the app would never let them use. Strangers could fill all 50 and lock out real players. A members list means only club members ever take a seat. Free seats by removing departed players on the Users page. The cost is that the organiser adds a player's email to the group when inviting them.</p></details>
+
+<h3 id="detail-worker">4. The website itself: a Cloudflare Worker</h3>
+<p><strong>Why:</strong> the app was already built to run on Cloudflare: Next.js through vinext, with D1 and R2 bindings. So it runs on Workers with no rewrite.</p>
+<p><strong>How</strong> (<code>wrangler.jsonc</code>):</p>
+<ul>
+  <li><strong>Worker name:</strong> <code>hrsc-prithvi</code>, built by <code>pnpm build</code> into <code>dist/</code>.</li>
+  <li><strong>Address:</strong> <code>routes: [{ pattern: "prithvifc.ca", custom_domain: true }]</code>. The deploy attaches the domain and creates its DNS record, so there's no clicking around in the dashboard.</li>
+  <li><strong>No second address:</strong> <code>workers_dev: false</code> turns off the extra <code>*.workers.dev</code> address, so the site lives at exactly one URL.</li>
+  <li><strong>Settings and secrets:</strong> the database ID, Access team URL, AUD tag and R2 limits are plain <code>vars</code>, not secrets. The one secret, <code>CLUB_SETUP_KEY</code>, is set separately with <code>wrangler secret put</code> and never stored in the repo.</li>
+</ul>
+<p><strong>Plan:</strong> Workers Free allows 100,000 requests a day. Past that, requests are refused rather than billed. On 2 October 2026 the account owner checked Workers &amp; Pages &rarr; Plans in the dashboard and confirmed there is no paid Workers plan, so the account is on Workers Free. This was a dashboard check, not an API check.</p>
+
+<h3 id="detail-domain">5. The domain</h3>
+<p><code>prithvifc.ca</code> is a zone on the club's Cloudflare account. It's on the Free plan, uses Cloudflare's nameservers, and its status is active (checked through the Cloudflare API). The domain needs to be on the same account so the Worker can claim it as a custom domain and Access can protect paths on it.</p>
+
+<h3 id="detail-d1">6. The database: D1</h3>
+<p><strong>Why:</strong> the app stores the club as one JSON document, plus separate tables for vote receipts, anonymous ballots, maintenance records and the R2 ledger. D1 is Cloudflare's SQLite database and the app already used it.</p>
+<p><strong>How:</strong></p>
+<ul>
+  <li>Created with <code>wrangler d1 create hrsc-prithvi</code> in Western North America.</li>
+  <li>Migrations <code>0000</code>–<code>0003</code> (in <code>drizzle/</code>) applied with <code>wrangler d1 migrations apply DB --remote</code>. The Deploy workflow also runs this before every deploy, so a new migration can't be forgotten.</li>
+  <li>D1 Free stops at its daily limits instead of billing.</li>
+</ul>
+
+<h3 id="detail-r2">7. Photos and videos: R2, and the free-tier guardrail</h3>
+<p><strong>Why it needs a guardrail:</strong> R2's free tier covers 10 GB-month of storage, 1 million Class A operations and 10 million Class B operations a month. Past that, R2 bills, and as far as we know Cloudflare offers no hard spending cap for it. It's the only service in this setup that can charge without stopping first, so the app enforces limits itself.</p>
+<p><strong>How</strong> (<code>lib/r2-budget.ts</code>, the only code allowed to touch the bucket):</p>
+<ul>
+  <li><strong><code>putObject</code></strong> (photo or clip upload): adds one Class A operation to this month's count in D1 and reserves the file's bytes in a ledger, then uploads. If either would go past its limit, the upload is refused.</li>
+  <li><strong><code>getObject</code></strong> (showing a photo, or one video chunk of up to 1 MB): adds one Class B operation first.</li>
+  <li><strong><code>deleteObject</code></strong>: deleting is free in R2. The ledger row is removed only after R2 confirms the delete, so a failed delete keeps being counted. Over-counting is the safe side.</li>
+  <li><strong>Checks come first:</strong> the file is validated and the user's sign-in and permissions are checked before anything is charged. A bad upload or a stranger costs nothing.</li>
+  <li><strong>Missing limits:</strong> every upload and view is refused (fails closed).</li>
+</ul>
+<figure>
+<svg viewBox="0 0 760 210" role="img" aria-labelledby="budget-title">
+  <title id="budget-title">Upload path: validate and authorize, charge the monthly operation counter, reserve storage, then write to R2; any failed check stops before R2</title>
+  <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" class="svg-arrow"/></marker></defs>
+  <rect x="10" y="30" width="150" height="70" rx="10" class="svg-box"/><text x="85" y="58" text-anchor="middle" class="svg-text">1. Validate</text><text x="85" y="78" text-anchor="middle" class="svg-small">size, type, sign-in, role</text>
+  <rect x="200" y="30" width="160" height="70" rx="10" class="svg-warn"/><text x="280" y="58" text-anchor="middle" class="svg-text">2. Count operation</text><text x="280" y="78" text-anchor="middle" class="svg-small">r2_usage this month</text>
+  <rect x="400" y="30" width="160" height="70" rx="10" class="svg-warn"/><text x="480" y="58" text-anchor="middle" class="svg-text">3. Reserve bytes</text><text x="480" y="78" text-anchor="middle" class="svg-small">r2_objects ≤ quota</text>
+  <rect x="600" y="30" width="150" height="70" rx="10" class="svg-accent"/><text x="675" y="58" text-anchor="middle" class="svg-text">4. Write to R2</text><text x="675" y="78" text-anchor="middle" class="svg-small">only now</text>
+  <rect x="200" y="140" width="360" height="50" rx="10" class="svg-bad"/><text x="380" y="170" text-anchor="middle" class="svg-text">Refused (400/403/503): R2 is never touched</text>
+  <path d="M160,65 L200,65" class="svg-line" marker-end="url(#a3)"/>
+  <path d="M360,65 L400,65" class="svg-line" marker-end="url(#a3)"/>
+  <path d="M560,65 L600,65" class="svg-line" marker-end="url(#a3)"/>
+  <path d="M85,100 L85,165 L200,165" class="svg-dash" marker-end="url(#a3)"/>
+  <path d="M280,100 L280,140" class="svg-dash" marker-end="url(#a3)"/>
+  <path d="M480,100 L480,140" class="svg-dash" marker-end="url(#a3)"/>
+</svg>
+<figcaption>Each check runs before R2 is reached. Views follow the same pattern with a single Class B count.</figcaption>
+</figure>
+<div class="table-wrap"><table>
+  <thead><tr><th>Limit (Worker var)</th><th>Set to</th><th>R2 free tier</th><th>What happens at the limit</th></tr></thead>
+  <tbody>
+    <tr><td><code>R2_STORAGE_QUOTA_BYTES</code></td><td>8 GB</td><td>10 GB-month</td><td>Uploads refused until a clip is removed</td></tr>
+    <tr><td><code>R2_CLASS_A_MONTHLY_LIMIT</code></td><td>500,000</td><td>1,000,000</td><td>Uploads pause until the next UTC month</td></tr>
+    <tr><td><code>R2_CLASS_B_MONTHLY_LIMIT</code></td><td>5,000,000</td><td>10,000,000</td><td>Photos and videos pause until the next UTC month</td></tr>
+    <tr><td>Per file (in the routes)</td><td>Photo 2 MB, clip 20 MB</td><td>n/a</td><td>That file is refused</td></tr>
+  </tbody>
+</table></div>
+<p>The gap below the free tier covers anything done outside the app, such as files uploaded by hand from the dashboard, plus any orphaned objects.</p>
+<p><strong>How the rule is kept:</strong></p>
+<ul>
+  <li><code>tests/r2-boundary.mjs</code> fails CI if any file other than <code>lib/r2-budget.ts</code> mentions the bucket.</li>
+  <li><code>AGENTS.md</code> states the free-tier rules for anyone changing the code, human or AI. <code>CLAUDE.md</code> just imports it.</li>
+  <li>The integration test runs a deliberately tight budget and checks that each limit is enforced, that refused uploads store nothing, that deletes free up space, and that missing limits fail closed.</li>
+</ul>
+<p><strong>Created as:</strong> bucket <code>hrsc-prithvi-media</code> in Western North America, after R2 was turned on in the dashboard. It started with 0 objects, so the ledger matches reality from day one.</p>
+<p><strong>Known limit:</strong> one signed-in player who uploads over and over could use up the month's upload allowance, pausing uploads for everyone until the month ends. It wouldn't cost money, and there are no per-user limits yet.</p>
+
+<h3 id="detail-deploy">8. Deploying: GitHub Actions</h3>
+<figure>
+<svg viewBox="0 0 760 150" role="img" aria-labelledby="deploy-title">
+  <title id="deploy-title">Deploy pipeline: pull requests run verify; a manual run on main also refuses placeholders, applies migrations, builds and deploys</title>
+  <defs><marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" class="svg-arrow"/></marker></defs>
+  <rect x="10" y="40" width="130" height="70" rx="10" class="svg-box"/><text x="75" y="68" text-anchor="middle" class="svg-text">Verify</text><text x="75" y="88" text-anchor="middle" class="svg-small">every PR + push</text>
+  <rect x="180" y="40" width="130" height="70" rx="10" class="svg-warn"/><text x="245" y="68" text-anchor="middle" class="svg-text">Placeholders?</text><text x="245" y="88" text-anchor="middle" class="svg-small">refuse if any</text>
+  <rect x="350" y="40" width="130" height="70" rx="10" class="svg-box"/><text x="415" y="68" text-anchor="middle" class="svg-text">Migrate D1</text><text x="415" y="88" text-anchor="middle" class="svg-small">--remote</text>
+  <rect x="520" y="40" width="100" height="70" rx="10" class="svg-box"/><text x="570" y="80" text-anchor="middle" class="svg-text">Build</text>
+  <rect x="660" y="40" width="90" height="70" rx="10" class="svg-accent"/><text x="705" y="80" text-anchor="middle" class="svg-text">Deploy</text>
+  <path d="M140,75 L180,75" class="svg-line" marker-end="url(#a4)"/>
+  <path d="M310,75 L350,75" class="svg-line" marker-end="url(#a4)"/>
+  <path d="M480,75 L520,75" class="svg-line" marker-end="url(#a4)"/>
+  <path d="M620,75 L660,75" class="svg-line" marker-end="url(#a4)"/>
+  <text x="465" y="135" text-anchor="middle" class="svg-small">only on a manual "Run workflow" from main</text>
+</svg>
+<figcaption><code>.github/workflows/deploy.yml</code>: verify runs everywhere, and deploy runs only when you start it by hand from <code>main</code>.</figcaption>
+</figure>
+<p><strong>Verify</strong> runs on every pull request and every push. It checks:</p>
+<ul>
+  <li>the typecheck</li>
+  <li>the R2 boundary test</li>
+  <li>the build</li>
+  <li>the integration test against a local emulator, which never touches production</li>
+</ul>
+<p><strong>Deploy</strong> runs only when started by hand from <code>main</code>. It refuses while any <code>REPLACE_WITH_</code> placeholder is left in <code>wrangler.jsonc</code>, then applies D1 migrations, builds, and runs <code>wrangler deploy</code>.</p>
+<p><strong>Repo secrets</strong> on <code>ojdh/HRSC-Prithvi</code>:</p>
+<ul>
+  <li><code>CLOUDFLARE_API_TOKEN</code>: created from Cloudflare's "Edit Cloudflare Workers" template, plus D1 Edit, scoped to <code>prithvifc.ca</code>.</li>
+  <li><code>CLOUDFLARE_ACCOUNT_ID</code>.</li>
+</ul>
+<p>Both were added in the GitHub UI and are never shown again.</p>
+<details><summary>Why deploys come from the fork</summary>
+<p>The original repo belongs to a different GitHub account (<code>sujay1059/HRSC-Prithvi</code>), and we only have read access there. Deploying from <code>ojdh/HRSC-Prithvi</code> means we hold the secrets and can start deploys. The self-hosting change is still open on the original repo as PR #1 if its owner wants it.</p></details>
+<details><summary>A bug found before the first deploy</summary>
+<p>The placeholder check first used <code>grep REPLACE_WITH_ wrangler.jsonc</code>. That also matched the explanatory comment at the top of the file, so it would have refused to deploy even with every value filled in. It now skips comment lines and still catches a placeholder anywhere in a value, including inside the team URL. Fixed in PR #2.</p></details>
+
+<h3 id="detail-reviews">9. Reviews and checks along the way</h3>
+<ul>
+  <li><strong>Self-hosting PR (original repo, #1):</strong> typecheck, build and 101 integration checks passed locally before its CI had ever run. Two fixes were then added on top:
+    <ul>
+      <li>keep the homepage public</li>
+      <li>declare the custom domain in code and turn off <code>workers.dev</code></li>
+    </ul>
+  </li>
+  <li><strong>Guardrails PR (fork, #1):</strong> the tests were written first and seen to fail. The finished change passes 114 checks (101 existing, 13 new), the boundary test, the typecheck, lint on the changed files, and a dry-run deploy.
+    <ul>
+      <li>A Codex adversarial review raised one finding: files already in R2 wouldn't be counted. It was rejected, because the bucket didn't exist yet and was created empty. It would only matter if old media were imported, and the README says what to do in that case.</li>
+    </ul>
+  </li>
+  <li><strong>Production settings PR (fork, #2):</strong> CI passed, and the Codex review approved with no findings.</li>
+  <li><strong>Explainer PR (fork, #3):</strong> the Codex review found that this page contradicted itself about whether the Workers plan had been checked. Both places were fixed to say the owner confirmed it in the dashboard.</li>
+</ul>
+
+<h3 id="detail-security">10. What's secret and what isn't</h3>
+<div class="table-wrap"><table>
+  <thead><tr><th>Value</th><th>Secret?</th><th>Where it lives</th></tr></thead>
+  <tbody>
+    <tr><td>Cloudflare API token</td><td>Yes</td><td>GitHub repo secret only</td></tr>
+    <tr><td><code>CLUB_SETUP_KEY</code></td><td>Yes</td><td>Worker secret, plus a private file for the organiser</td></tr>
+    <tr><td>Account ID</td><td>Not strictly, but not published</td><td>GitHub repo secret</td></tr>
+    <tr><td>D1 database ID, Access team URL, AUD tag, R2 limits</td><td>No</td><td><code>wrangler.jsonc</code> (they identify resources and grant no access)</td></tr>
+  </tbody>
+</table></div>
+
+<h3 id="detail-pending">11. Done and still to do</h3>
+<p><strong>Done on 2 October 2026:</strong></p>
+<ul>
+  <li class="ok">Merged PR #2 (production settings and the placeholder-check fix) into the fork's <code>main</code>.</li>
+  <li class="ok">Ran the Deploy workflow. No migrations were pending, the Worker was uploaded, and <code>prithvifc.ca</code> was attached as its custom domain.</li>
+  <li class="ok">Set <code>CLUB_SETUP_KEY</code> as a Worker secret. The only other copy is a private file for the organiser.</li>
+  <li class="ok">Checked the live site: the homepage returns 200 without sign-in; <code>/winterleague</code>, <code>/join</code> and <code>/api/*</code> redirect to the Access sign-in; the <code>workers.dev</code> address is disabled.</li>
+  <li class="ok">The account owner confirmed in the dashboard (Workers &amp; Pages &rarr; Plans) that there is no paid Workers plan, so the account is on Workers Free.</li>
+</ul>
+<p><strong>Still to do:</strong></p>
+<ul>
+  <li class="todo">The organiser signs in at <code>prithvifc.ca/winterleague</code>, enters the setup key, rebuilds the squads and sends invitations. Each player's email must be in the Club members rule group first.</li>
+  <li class="todo">Decide on the old data. The new site starts empty, so this is a fresh start unless old data is imported from ChatGPT Sites later. Importing would mean remapping player accounts and adding a ledger row for each imported file.</li>
+  <li class="todo">Shut down the ChatGPT Sites copy once players have moved over.</li>
+  <li class="todo">Separate from Cloudflare: the web app manifest, home-screen icons and service worker are referenced but not in the repo, so "Add to Home Screen" can't install yet.</li>
+  <li>Optional backstop: a usage-based billing alert under Notifications in the Cloudflare dashboard.</li>
+</ul>
+
+<footer>
+  Maintained in the repo as <code>docs/cloudflare.html</code> and <code>docs/cloudflare.md</code>, which have the same content. Update both whenever the Cloudflare setup changes. The rules for the free tier are in <code>AGENTS.md</code>.
+</footer>
+
+</main>
+</body>
+</html>

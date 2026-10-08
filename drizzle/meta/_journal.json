@@ -22,6 +22,34 @@
       "when": 1790131450325,
       "tag": "0002_remove_practice_matchdays",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1790965225567,
+      "tag": "0003_r2_free_tier_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1791439279691,
+      "tag": "0004_multi_admin",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1791439729781,
+      "tag": "0005_team_details",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1791440307446,
+      "tag": "0006_day_times",
+      "breakpoints": true
     }
   ]
 }
