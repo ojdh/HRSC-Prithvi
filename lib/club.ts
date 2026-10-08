@@ -29,16 +29,17 @@ export function result(a:Team,b:Team,scoreA:number,scoreB:number,incumbent:Team)
   const winner=scoreA===scoreB?null:scoreA>scoreB?a:b;
   return {winner,exit:winner?(winner===a?b:a):incumbent};
 }
+// League table: 3 points a win, 1 a draw; ranked by points, then goal difference, then goals scored.
 export function teamStats(days:Day[]){
-  const stats=TEAMS.map(team=>({team,played:0,wins:0,losses:0,draws:0,gf:0,ga:0,gd:0,form:[] as string[]}));
+  const stats=TEAMS.map(team=>({team,played:0,points:0,wins:0,losses:0,draws:0,gf:0,ga:0,gd:0,form:[] as string[]}));
   for(const d of [...days].sort((a,b)=>a.date.localeCompare(b.date)))for(const r of d.rounds)for(const s of stats){
     if(r.a!==s.team&&r.b!==s.team)continue;
     const f=r.a===s.team?r.scoreA:r.scoreB, a=r.a===s.team?r.scoreB:r.scoreA;
     s.played++;s.gf+=f;s.ga+=a;s.gd=s.gf-s.ga;
-    if(f>a)s.wins++;else if(f<a)s.losses++;else s.draws++;
+    if(f>a)s.wins++;else if(f<a)s.losses++;else s.draws++;s.points=3*s.wins+s.draws;
     s.form.push(f>a?'W':f<a?'L':'D');
   }
-  return stats.sort((a,b)=>b.wins-a.wins||b.gd-a.gd||b.gf-a.gf);
+  return stats.sort((a,b)=>b.points-a.points||b.gd-a.gd||b.gf-a.gf);
 }
 // attended counts played matchdays (at least one round) the player was marked attending; attendance is that share as a whole percent.
 export function playerStats(players:Player[],days:Day[]){

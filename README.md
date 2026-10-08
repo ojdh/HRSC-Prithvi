@@ -10,7 +10,7 @@ The first organiser signs in through Cloudflare Access and supplies the one-use 
 
 Confirm attendance and opening teams. Attendance and that day's team assignments become immutable when voting opens or the first result is entered. Results can be recorded while voting is open or closed. Each game lasts ten minutes and can end with any score; the winner stays. A drawn game sends off the team that has been on longest (the previous winner); for a draw in the first game, the exit chosen at setup leaves. Players who arrive after the first game can be added to the day's attendance until voting opens. Player stats count matchdays attended (played matchdays on which the player was marked attending) and attendance as a share of played matchdays; Standings shows a Most matchdays board.
 
-Stats derive from stored results and selected round lineups, with historical team snapshots. Draws grant no wins. Own goals count for the team's score but not individual goals/assists. Unknown scorers can be recorded explicitly. Undo the latest round to correct a result, then re-enter it. An organiser can export the public stats and match history as JSON.
+Stats derive from stored results and selected round lineups, with historical team snapshots. Draws grant no wins. The league table awards 3 points for a win, 1 for a draw and 0 for a loss, and ranks teams by points, then goal difference, then goals scored; GF and GA are the sums of each team's scores over every game played, and GD is GF minus GA. Own goals count for the team's score but not individual goals/assists. Unknown scorers can be recorded explicitly. Undo the latest round to correct a result, then re-enter it. An organiser can export the public stats and match history as JSON.
 
 ## Gameday
 
