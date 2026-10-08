@@ -11,10 +11,19 @@ export type Player = {id:string;name:string;team:Team;age:number|null;height:num
 export type Goal = {team:Team;scorer:string|null;assist:string|null;ownGoal:boolean};
 export type Round = {id:string;a:Team;b:Team;scoreA:number;scoreB:number;goals:Goal[];lineup:string[];exit:Team;winner:Team|null;videoUrl?:string|null};
 // A scheduled day has an empty roster and no opening teams until it is set up on the day. start/end are club-local HH:MM.
-export type Day = {id:string;date:string;start:string;end:string;roster:{id:string;team:Team}[];opening:[Team,Team]|null;firstExit:Team|null;rounds:Round[];poll:'ready'|'open'|'closed';videoUrl?:string|null;videoKey?:string|null};
+export type Day = {id:string;date:string;start:string;end:string;roster:{id:string;team:Team}[];opening:[Team,Team]|null;firstExit:Team|null;rounds:Round[];poll:'ready'|'open'|'closed';videoUrl?:string|null;videoKey?:string|null;deletion?:DayDeletion};
+// A request to delete a played matchday. approvals holds player ids; the requester's counts as the first.
+export type DayDeletion = {requestedBy:string;approvals:string[]};
+export const DELETION_APPROVALS=3;
+// A game as the edit log records it: the score and goals, without the lineup.
+export type RoundSnapshot = Pick<Round,'a'|'b'|'scoreA'|'scoreB'|'winner'|'exit'|'goals'>;
+export type LogAction = 'editRound'|'undoRound'|'requestDayDeletion'|'approveDayDeletion'|'cancelDayDeletion'|'deleteDay';
+// Admin-only history of corrections and deletions, newest first. by is a player id; date keeps an entry readable once its day is gone.
+export type LogEntry = {id:string;at:string;by:string;action:LogAction;dayId:string;date:string;roundId?:string;before?:RoundSnapshot;after?:RoundSnapshot};
+export const LOG_LIMIT=500;
 // adminId is the owner's account: the only person who can grant or remove admin rights. admins holds player ids.
-export type Club = {adminId:string;admins:string[];teams:Record<Team,TeamInfo>;players:Player[];days:Day[]};
-export type PublicClub = {invitation?:{name:string;team:Team};players:Player[];days:Day[];revision:number;initialized:boolean;isAdmin:boolean;isOwner:boolean;owner:string|null;admins:string[];teams:Record<Team,TeamInfo>;me:string|null;polls:Record<string,{count:number;voted:boolean;tally:{candidate:string;votes:number}[]}>};
+export type Club = {adminId:string;admins:string[];teams:Record<Team,TeamInfo>;players:Player[];days:Day[];log?:LogEntry[]};
+export type PublicClub = {invitation?:{name:string;team:Team};players:Player[];days:Day[];revision:number;initialized:boolean;isAdmin:boolean;isOwner:boolean;owner:string|null;admins:string[];teams:Record<Team,TeamInfo>;me:string|null;log?:LogEntry[];polls:Record<string,{count:number;voted:boolean;tally:{candidate:string;votes:number}[]}>};
 export const emptyClub:PublicClub={players:[],days:[],revision:0,initialized:false,isAdmin:false,isOwner:false,owner:null,admins:[],teams:DEFAULT_TEAMS,me:null,polls:{}};
 // Teams with no attending player among `ids`: a matchday needs all three teams present.
 export function teamsWithout(ids:string[],players:{id:string;team:Team}[]){return TEAMS.filter(t=>!players.some(p=>p.team===t&&ids.includes(p.id)));}
@@ -27,6 +36,17 @@ export function nextMatch(day:ReadyDay):{a:Team;b:Team;waiting:Team;incumbent:Te
   const waiting=TEAMS.find(t=>t!==last.a&&t!==last.b)!;
   return {a:survivor,b:waiting,waiting:last.exit,incumbent:survivor};
 }
+// The team that had stayed on longer when round `index` was played: the first draw exit for the opening game,
+// otherwise whichever of that round's teams also played the game before it. Stored teams never change, so this
+// holds even after an earlier result is corrected.
+export function incumbentAt(day:ReadyDay,index:number):Team {
+  const round=day.rounds[index],previous=day.rounds[index-1];
+  if(!previous)return day.firstExit;
+  return round.a===previous.a||round.a===previous.b?round.a:round.b;
+}
+export const snapshot=({a,b,scoreA,scoreB,winner,exit,goals}:Round):RoundSnapshot=>({a,b,scoreA,scoreB,winner,exit,goals});
+// A played matchday is deleted only through approvals; an unplayed one can simply be cancelled.
+export const isPlayed=(day:Day)=>day.rounds.length>0||day.poll!=='ready';
 export function result(a:Team,b:Team,scoreA:number,scoreB:number,incumbent:Team){
   const winner=scoreA===scoreB?null:scoreA>scoreB?a:b;
   return {winner,exit:winner?(winner===a?b:a):incumbent};

@@ -1,15 +1,18 @@
 import { env } from 'cloudflare:workers';
 import { z } from 'zod';
 import { getUser } from '../../auth';
-import { TEAMS,DEFAULT_TEAMS,MAX_SERIES_DAYS,nextMatch,result,emptyClub,isReady,isVideoUrl,validDate,weeklyDates,clubToday,type Club,type Day } from '@/lib/club';
+import { TEAMS,DEFAULT_TEAMS,MAX_SERIES_DAYS,DELETION_APPROVALS,LOG_LIMIT,nextMatch,incumbentAt,result,snapshot,isPlayed,emptyClub,isReady,isVideoUrl,validDate,weeklyDates,clubToday,type Club,type Day,type Team,type LogEntry } from '@/lib/club';
 import { db,readClub,saveClub,check,digest,token,role,ClubError } from '@/lib/server-club';
 import {pendingInvite,findInvitation,inviteCookie} from '@/lib/server-invitations';
+import {deleteObject} from '@/lib/r2-budget';
 export const dynamic='force-dynamic';
 const team=z.enum(TEAMS),id=z.string().min(1).max(100);
 const date=z.string().refine(validDate,'Choose a real date on or after September 1, 2026.'),time=z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/,'Choose a valid time.');
 const slot=z.object({start:time,end:time}),endsAfterStart=[(v:{start:string;end:string})=>v.end>v.start,'The end time must be after the start time.'] as const;
 const videoUrl=z.string().trim().max(500).refine(v=>!v||isVideoUrl(v),'Use an HTTPS YouTube, Vimeo, or Google Drive video link.');
 const MAX_DAYS=300;
+const score=z.number().int().min(0).max(20);
+const roundInput=z.object({dayId:id,scoreA:score,scoreB:score,lineup:z.array(id).min(2),goals:z.array(z.object({team,scorer:id.nullable(),assist:id.nullable(),ownGoal:z.boolean()})).max(40)});
 const details=z.object({name:z.string().trim().min(1).max(60),age:z.number().int().min(5).max(100).nullable(),height:z.number().int().min(70).max(250).nullable(),district:z.string().trim().max(60).nullable(),position:z.enum(['Goalkeeper','Defender','Midfielder','Forward','All-rounder'])});
 function response(value:unknown,status=200){return Response.json(value,{status,headers:{'Cache-Control':'private, no-store'}});}
 function fail(e:unknown){if(e instanceof ClubError)return response({error:e.message},e.status);if(e instanceof z.ZodError)return response({error:e.issues[0].message},400);console.error('Club request failed',e instanceof Error?e.message:'unknown');return response({error:'We could not save or load that. Please retry; your form is still here.'},503);}
@@ -28,7 +31,7 @@ export async function GET(req:Request){try{
     const tally=day.poll==='closed'?tallies.filter(t=>t.day===day.id).map(({candidate,votes})=>({candidate,votes})):[];
     polls[day.id]={count:counts.find(x=>x.day===day.id)?.n??0,voted:mine.some(x=>x.day===day.id),tally};
   }
-  return response({initialized:true,revision,isAdmin:admin,isOwner:owner,owner:club.players.find(p=>p.userId===club.adminId)?.id??null,admins:club.admins,teams:club.teams,me:me?.id??null,players:club.players.map(({userId,inviteHash,legacyInviteHash,inviteToken,...p})=>({...p,linked:!!userId})),days:club.days,polls});
+  return response({initialized:true,revision,isAdmin:admin,isOwner:owner,owner:club.players.find(p=>p.userId===club.adminId)?.id??null,admins:club.admins,teams:club.teams,me:me?.id??null,players:club.players.map(({userId,inviteHash,legacyInviteHash,inviteToken,...p})=>({...p,linked:!!userId})),days:admin?club.days:club.days.map(({deletion,...d})=>d),polls,...(admin?{log:club.log??[]}:{})});
 }catch(e){return fail(e);}}
 export async function POST(req:Request){try{
   const origin=req.headers.get('origin');check(!origin||origin===new URL(req.url).origin,'This request must come from the club website.',403);
@@ -60,7 +63,7 @@ export async function POST(req:Request){try{
     return response({ok:true});
   }
   check(body.revision===revision,'The club was updated. Refresh before saving this change.',409);
-  let extra:Record<string,unknown>={};
+  let extra:Record<string,unknown>={},deleted:Day|undefined;
   if(action==='claim'){
     check(!me,'This account already has a player profile. Sign out and sign in with the invited player’s email.');
     const p=await findInvitation(club,z.string().min(20).max(150).parse(body.token||pendingInvite(req)));check(p&&!p.userId,'This invitation has already been used or is unavailable. Ask your organiser for the current link.');p.userId=user.userId;delete p.inviteHash;delete p.legacyInviteHash;delete p.inviteToken;
@@ -120,17 +123,31 @@ export async function POST(req:Request){try{
       const day=editableDay(club,id.parse(body.dayId),'Match days cannot be cancelled after voting opens or results are entered.');check(!day.videoKey,'Remove the matchday clip before cancelling this match day.');
       club.days=club.days.filter(d=>d.id!==day.id);
     }else if(action==='addRound'){
-      const input=z.object({dayId:id,scoreA:z.number().int().min(0).max(20),scoreB:z.number().int().min(0).max(20),lineup:z.array(id).min(2),goals:z.array(z.object({team,scorer:id.nullable(),assist:id.nullable(),ownGoal:z.boolean()})).max(40)}).parse(body);
+      const input=roundInput.parse(body);
       const day=club.days.find(d=>d.id===input.dayId);check(day,'Match day not found.');check(isReady(day),'Set attendance and opening teams first.');const n=nextMatch(day);
-      const lineup=[...new Set(input.lineup)];check(lineup.every(pid=>day.roster.some(p=>p.id===pid&&[n.a,n.b].includes(p.team))),'Only attending players on the two playing teams can appear.');
-      check([n.a,n.b].every(t=>day.roster.some(p=>p.team===t&&lineup.includes(p.id))),'Include at least one player from each playing team.');
-      check(input.goals.filter(g=>g.team===n.a).length===input.scoreA&&input.goals.filter(g=>g.team===n.b).length===input.scoreB&&input.goals.length===input.scoreA+input.scoreB,'Goal entries must match the score.');
-      for(const g of input.goals){check([n.a,n.b].includes(g.team),'Invalid scoring team.');check(!g.ownGoal||!g.assist,'Own goals cannot have assists.');
-        if(g.scorer){const p=day.roster.find(p=>p.id===g.scorer);check(p&&lineup.includes(p.id)&&(g.ownGoal?p.team!==g.team:p.team===g.team),'Choose a scorer who played for the correct team.');}
-        if(g.assist){check(g.assist!==g.scorer,'A scorer cannot assist their own goal.');check(day.roster.some(p=>p.id===g.assist&&p.team===g.team)&&lineup.includes(g.assist),'Choose an assist from the scoring team’s lineup.');}}
+      const lineup=playedLineup(day,n.a,n.b,input);
       day.rounds.push({id:crypto.randomUUID(),a:n.a,b:n.b,scoreA:input.scoreA,scoreB:input.scoreB,lineup,goals:input.goals,...result(n.a,n.b,input.scoreA,input.scoreB,n.incumbent)});
+    }else if(action==='editRound'){
+      const input=roundInput.extend({roundId:id}).parse(body);
+      const day=club.days.find(d=>d.id===input.dayId);check(day&&isReady(day),'Match day not found.');
+      const index=day.rounds.findIndex(r=>r.id===input.roundId);check(index>=0,'Round not found.');const round=day.rounds[index],before=snapshot(round);
+      const lineup=playedLineup(day,round.a,round.b,input);
+      Object.assign(round,{scoreA:input.scoreA,scoreB:input.scoreB,lineup,goals:input.goals,...result(round.a,round.b,input.scoreA,input.scoreB,incumbentAt(day,index))});
+      record(club,actor(me),'editRound',day,{roundId:round.id,before,after:snapshot(round)});
     }else if(action==='undoRound'){
-      const day=club.days.find(d=>d.id===body.dayId);check(day&&day.rounds.length,'There is no round to undo.');check(day.rounds.at(-1)?.id===body.roundId,'The latest round has changed. Refresh first.',409);day.rounds.pop();
+      const day=club.days.find(d=>d.id===body.dayId);check(day&&day.rounds.length,'There is no round to undo.');check(day.rounds.at(-1)?.id===body.roundId,'The latest round has changed. Refresh first.',409);
+      const round=day.rounds.pop()!;record(club,actor(me),'undoRound',day,{roundId:round.id,before:snapshot(round)});
+    }else if(action==='requestDayDeletion'){
+      const day=club.days.find(d=>d.id===body.dayId);check(day,'Match day not found.');
+      check(isPlayed(day),'This match day has not been played. Cancel it instead.');check(!day.deletion,'Deleting this match day has already been requested.');
+      const by=actor(me);day.deletion={requestedBy:by,approvals:[by]};record(club,by,'requestDayDeletion',day);deleted=settleDeletion(club,day,by);
+    }else if(action==='approveDayDeletion'){
+      const day=club.days.find(d=>d.id===body.dayId);check(day?.deletion,'There is no deletion request for this match day.');
+      const by=actor(me);check(!day.deletion.approvals.includes(by),'You have already approved deleting this match day.');
+      day.deletion.approvals.push(by);record(club,by,'approveDayDeletion',day);deleted=settleDeletion(club,day,by);
+    }else if(action==='cancelDayDeletion'){
+      const day=club.days.find(d=>d.id===body.dayId);check(day?.deletion,'There is no deletion request for this match day.');
+      delete day.deletion;record(club,actor(me),'cancelDayDeletion',day);
     }else if(action==='openPoll'||action==='closePoll'){
       const day=club.days.find(d=>d.id===body.dayId);check(day,'Match day not found.');check(action==='closePoll'||isReady(day),'Set attendance and opening teams first.');check(action==='closePoll'||day.date<=clubToday(),'Voting opens on or after the match day.');check(day.poll===(action==='openPoll'?'ready':'open'),'Voting has already changed.');day.poll=action==='openPoll'?'open':'closed';
     }else if(action==='setMatchVideo'){
@@ -139,7 +156,35 @@ export async function POST(req:Request){try{
       const input=z.object({dayId:id,roundId:id,videoUrl}).parse(body);const round=club.days.find(d=>d.id===input.dayId)?.rounds.find(r=>r.id===input.roundId);check(round,'Round not found.');round.videoUrl=input.videoUrl||null;
     }else throw new ClubError('Unknown action.');
   }
-  await saveClub(club,revision);const reply=response({ok:true,...extra});if(action==='claim')reply.headers.set('Set-Cookie',inviteCookie('',new URL(req.url).protocol==='https:'));return reply;
+  await saveClub(club,revision);
+  if(deleted){
+    await db().batch([db().prepare('DELETE FROM ballots WHERE day=?').bind(deleted.id),db().prepare('DELETE FROM vote_receipts WHERE day=?').bind(deleted.id)]);
+    if(deleted.videoKey)await deleteObject(deleted.videoKey);
+  }
+  const reply=response({ok:true,...extra,...(deleted?{deleted:true}:{})});if(action==='claim')reply.headers.set('Set-Cookie',inviteCookie('',new URL(req.url).protocol==='https:'));return reply;
 }catch(e){return fail(e);}}
 function attendee(club:Club,playerId:string){const p=club.players.find(x=>x.id===playerId&&x.active!==false);check(p,'An active attending player is missing.');return {id:p.id,team:p.team};}
 function editableDay(club:Club,dayId:string,locked:string){const day=club.days.find(d=>d.id===dayId);check(day,'Match day not found.');check(day.poll==='ready'&&!day.rounds.length,locked);return day;}
+// Validates a game's lineup, goals and score for the two teams that played it, and returns the de-duplicated lineup.
+function playedLineup(day:Day,a:Team,b:Team,input:z.infer<typeof roundInput>){
+  const lineup=[...new Set(input.lineup)];check(lineup.every(pid=>day.roster.some(p=>p.id===pid&&[a,b].includes(p.team))),'Only attending players on the two playing teams can appear.');
+  check([a,b].every(t=>day.roster.some(p=>p.team===t&&lineup.includes(p.id))),'Include at least one player from each playing team.');
+  check(input.goals.filter(g=>g.team===a).length===input.scoreA&&input.goals.filter(g=>g.team===b).length===input.scoreB&&input.goals.length===input.scoreA+input.scoreB,'Goal entries must match the score.');
+  for(const g of input.goals){check([a,b].includes(g.team),'Invalid scoring team.');check(!g.ownGoal||!g.assist,'Own goals cannot have assists.');
+    if(g.scorer){const p=day.roster.find(p=>p.id===g.scorer);check(p&&lineup.includes(p.id)&&(g.ownGoal?p.team!==g.team:p.team===g.team),'Choose a scorer who played for the correct team.');}
+    if(g.assist){check(g.assist!==g.scorer,'A scorer cannot assist their own goal.');check(day.roster.some(p=>p.id===g.assist&&p.team===g.team)&&lineup.includes(g.assist),'Choose an assist from the scoring team’s lineup.');}}
+  return lineup;
+}
+// The edit log names people by player id, so these actions need the admin's player profile.
+function actor(me:{id:string}|undefined){check(me,'Link your player profile before changing match records.',403);return me.id;}
+function record(club:Club,by:string,action:LogEntry['action'],day:Day,details:Pick<LogEntry,'roundId'|'before'|'after'>={}){
+  club.log=[{id:crypto.randomUUID(),at:new Date().toISOString(),by,action,dayId:day.id,date:day.date,...details},...(club.log??[])].slice(0,LOG_LIMIT);
+}
+// Deletes the day once the owner has approved or enough current admins have. Approvals from people who are no
+// longer admins do not count. Returns the removed day so its ballots and clip can be cleaned up after saving.
+function settleDeletion(club:Club,day:Day,by:string){
+  const ownerId=club.players.find(p=>p.userId===club.adminId)?.id;
+  const current=day.deletion!.approvals.filter(pid=>pid===ownerId||club.admins.includes(pid)&&club.players.some(p=>p.id===pid&&p.active!==false));
+  if(!(ownerId&&current.includes(ownerId))&&current.length<DELETION_APPROVALS)return undefined;
+  club.days=club.days.filter(d=>d.id!==day.id);record(club,by,'deleteDay',day);return day;
+}

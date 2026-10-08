@@ -305,6 +305,65 @@ try{
   ok((await mf.dispatchFetch(origin+'/api/photo?team=black',{method:'DELETE',headers:await headers('black-user')})).status===403,'players cannot remove team photos');
   ok((await mf.dispatchFetch(origin+'/api/photo?team=black',{method:'DELETE',headers:await headers('owner')})).status===200,'admin removes a team photo');
   ok(!(await get()).data.teams.black.photo&&!(await bucket.head(secondCrest)),'removed team photo and its object are gone');
+  // Correcting a played game, the admin-only edit log, and deleting a played matchday.
+  const d1=await mf.getD1Database('DB'),rowsFor=async(table,day)=>(await d1.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE day=?`).bind(day).first('n'));
+  const dayOf=async(id,user='owner')=>(await get(user)).data.days.find(d=>d.id===id);
+  const editDay=series.dayIds[0];
+  await success('setupDay',{dayId:editDay,roster,a:'red',b:'black',firstExit:'red'});
+  await success('addRound',{dayId:editDay,scoreA:1,scoreB:0,lineup:[owner.id,black.id],goals:[goal('red',owner.id)]});
+  await success('addRound',{dayId:editDay,scoreA:0,scoreB:1,lineup:[owner.id,white.id],goals:[goal('white',white.id)]});
+  let edited=(await dayOf(editDay)).rounds;
+  const editBody=(round,scoreA,scoreB,goals,lineup)=>({dayId:editDay,roundId:round.id,scoreA,scoreB,goals,lineup});
+  for(const [action,body] of [['editRound',editBody(edited[0],0,0,[],[owner.id,black.id])],['requestDayDeletion',{dayId:editDay}],['approveDayDeletion',{dayId:editDay}],['cancelDayDeletion',{dayId:editDay}]])
+    ok((await post(action,body,'absent-user')).status===403,'players cannot '+action);
+  ok((await post('editRound',editBody(edited[0],2,0,[goal('black',black.id),goal('black',black.id)],[owner.id,black.id]))).status===400,'edited goals must match the edited score');
+  ok((await post('editRound',editBody(edited[1],1,0,[goal('red',owner.id)],[owner.id,black.id]))).status===400,'edited lineup must come from that round’s two teams');
+  ok((await post('editRound',{...editBody(edited[0],0,0,[],[owner.id,black.id]),roundId:'missing'})).status===400,'unknown round cannot be edited');
+  await success('editRound',editBody(edited[0],0,2,[goal('black',black.id),goal('black',null)],[owner.id,black.id]));
+  edited=(await dayOf(editDay)).rounds;
+  ok(edited[0].winner==='black'&&edited[0].exit==='red'&&edited[0].scoreB===2&&edited[0].goals.length===2,'editing a game recomputes its winner');
+  ok(edited[1].a==='red'&&edited[1].b==='white'&&edited[1].winner==='white','later games stay as they were played');
+  ok(JSON.stringify(model.nextMatch(await dayOf(editDay)))===JSON.stringify({a:'white',b:'black',waiting:'red',incumbent:'white'}),'next match before editing the last game');
+  await success('editRound',editBody(edited[1],2,0,[goal('red',owner.id),goal('red',owner.id)],[owner.id,white.id]));
+  const nextAfterEdit=model.nextMatch(await dayOf(editDay));
+  ok(nextAfterEdit.a==='red'&&nextAfterEdit.b==='black'&&nextAfterEdit.waiting==='white','editing the last game changes the next match');
+  await success('editRound',editBody(edited[1],0,0,[],[owner.id,white.id]));
+  ok((await dayOf(editDay)).rounds[1].exit==='red','a drawn edit sends off the team that had stayed on, replayed from earlier games');
+  await success('editRound',editBody(edited[0],1,1,[goal('red',owner.id),goal('black',black.id)],[owner.id,black.id]));
+  ok((await dayOf(editDay)).rounds[0].exit==='red','a drawn first game sends off the chosen first draw exit');
+  const ownerView=(await get()).data,editLog=ownerView.log.filter(e=>e.dayId===editDay&&e.action==='editRound');
+  ok(editLog.length===4&&editLog[0].by===owner.id&&editLog[0].roundId===edited[0].id&&editLog[0].before.scoreB===2&&editLog[0].after.scoreA===1&&editLog[0].date==='2026-09-13'&&Date.parse(editLog[0].at)<=Date.now(),'edits are logged newest first with who, when, before and after');
+  ok(!('log' in (await get('absent-user')).data),'players never receive the edit log');
+  // Voting and a clip on the played day, so deletion has something to clean up.
+  await success('openPoll',{dayId:editDay});await success('vote',{dayId:editDay,candidate:owner.id},'black-user');
+  const editClip=(await dayOf(editDay)).videoKey;
+  ok(editClip&&await bucket.head(editClip)&&await rowsFor('ballots',editDay)===1&&await rowsFor('vote_receipts',editDay)===1,'played day has a ballot, a receipt and a clip');
+  ok((await post('deleteDay',{dayId:editDay})).status===400,'a played matchday cannot be cancelled outright');
+  ok((await post('requestDayDeletion',{dayId:series.dayIds[3]})).status===400,'unplayed days are cancelled, not put to approval');
+  for(const p of [red,white,black])await success('setAdmin',{playerId:p.id,admin:true});
+  await success('requestDayDeletion',{dayId:editDay},'red-user');
+  ok((await post('requestDayDeletion',{dayId:editDay},'white-user')).status===400,'a deletion is only requested once');
+  ok((await post('approveDayDeletion',{dayId:editDay},'red-user')).status===400,'the same admin cannot approve twice');
+  ok(!(await success('approveDayDeletion',{dayId:editDay},'white-user')).deleted,'an approval short of the threshold reports the day as kept');
+  const pending=await dayOf(editDay);
+  ok(pending&&pending.deletion.requestedBy===red.id&&pending.deletion.approvals.length===2,'two admin approvals do not delete a played matchday');
+  ok(!('deletion' in await dayOf(editDay,'absent-user')),'players never see deletion requests');
+  const third=await success('approveDayDeletion',{dayId:editDay},'black-user');
+  ok(!await dayOf(editDay)&&third.deleted===true,'a third admin approval deletes the matchday and says so');
+  ok(await rowsFor('ballots',editDay)===0&&await rowsFor('vote_receipts',editDay)===0,'deleting a matchday removes its ballots and receipts');
+  ok(!await bucket.head(editClip),'deleting a matchday removes its clip from storage');
+  const deletionLog=(await get()).data.log.filter(e=>e.dayId===editDay).map(e=>e.action);
+  ok(JSON.stringify(deletionLog.slice(0,4))===JSON.stringify(['deleteDay','approveDayDeletion','approveDayDeletion','requestDayDeletion'])&&(await get()).data.log[0].date==='2026-09-13','deletion steps are logged and the log outlives the day');
+  // Approvals count only people who are admins when the decision is made.
+  await success('requestDayDeletion',{dayId:lateDay},'red-user');await success('approveDayDeletion',{dayId:lateDay},'white-user');
+  await success('setAdmin',{playerId:white.id,admin:false});
+  await success('approveDayDeletion',{dayId:lateDay},'black-user');
+  ok(await dayOf(lateDay),'approvals from a former admin do not count');
+  await success('cancelDayDeletion',{dayId:lateDay},'black-user');
+  ok(!(await dayOf(lateDay)).deletion&&(await get()).data.log[0].action==='cancelDayDeletion','any admin can withdraw a deletion request');
+  ok((await post('approveDayDeletion',{dayId:lateDay},'red-user')).status===400,'a withdrawn request cannot be approved');
+  await success('requestDayDeletion',{dayId});
+  ok(!await dayOf(dayId)&&await rowsFor('ballots',dayId)===0&&await rowsFor('vote_receipts',dayId)===0,'the owner alone deletes a played matchday');
   const tight=new Miniflare({...workerOptions,bindings:{...accessBindings,...budget({storage:pngBytes.length+clipBytes.length,classA:4,classB:1})}});
   try{
     const ownerId=await setUp(tight);
