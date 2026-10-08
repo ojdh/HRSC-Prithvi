@@ -169,6 +169,16 @@ try{
   await success('restorePlayer',{playerId:white.id});
   ok(!(await get('white-user')).data.isAdmin,'restored player is not an admin again');
   ok((await post('addPlayer',{...fields,name:'Too late',team:'red'},'white-user')).status===403,'former admin cannot change records');
+  // Teams: admins rename and recolour the three fixed team slots.
+  const tigers={team:'black',name:'Tigers',letter:'t',color:'#1F7A4D',motto:'Hunt as one.'};
+  ok((await post('editTeam',tigers,'black-user')).status===403,'players cannot edit teams');
+  for(const color of ['red','#fff','#ggg000'])ok((await post('editTeam',{...tigers,color})).status===400,'team colour must be #rrggbb: '+color);
+  ok((await post('editTeam',{...tigers,name:'team red'})).status===400,'team names must differ');
+  const beforeTeams=(await get()).data;
+  await success('editTeam',tigers);
+  const afterTeams=(await get('black-user')).data;
+  ok(JSON.stringify(afterTeams.teams.black)===JSON.stringify({name:'Tigers',color:'#1f7a4d',letter:'T',motto:'Hunt as one.'}),'team details saved and normalised');
+  ok(afterTeams.teams.red.name==='Team Red'&&JSON.stringify(afterTeams.days)===JSON.stringify(beforeTeams.days)&&afterTeams.players.find(p=>p.id===black.id).team==='black','renaming keeps rosters, rounds and assignments');
   const stale=state.revision;
   ok((await post('editPlayer',{...fields,...red,name:'Wrong overwrite'},'owner',stale)).status===409,'stale updates rejected');
   state=(await get()).data;ok(!JSON.stringify(state).includes('userId')&&!JSON.stringify(state).includes('inviteHash'),'private identity and invitation hashes not disclosed');
@@ -181,6 +191,7 @@ try{
   ok(photoRes.status===200&&photoRes.headers.get('content-type')==='image/png','stored photo served');
   ok((await mf.dispatchFetch(origin+'/api/photo?key='+encodeURIComponent(photo))).status===401,'photo needs sign-in');
   const ts=require('typescript');const source=await readFile('lib/club.ts','utf8');const js=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ES2022,target:ts.ScriptTarget.ES2022}}).outputText;const model=await import('data:text/javascript;base64,'+Buffer.from(js).toString('base64'));
+  ok(model.teamInk('#171918')==='#fffef9'&&model.teamInk('#eceddf')==='#173322'&&model.teamInk('#ff666b')==='#173322','crest text picks the more legible ink');
   const t=model.teamStats(state.days),p=model.playerStats(state.players,state.days);
   ok(t.find(x=>x.team==='red').wins===1&&t.find(x=>x.team==='black').wins===1,'team wins derived correctly');
   ok(p.find(x=>x.id===owner.id).goals===2&&p.find(x=>x.id===red.id).assists===1&&p.find(x=>x.id===red.id).played===1,'goals assists and selective appearances correct');
@@ -229,6 +240,7 @@ try{
     ok(view.isOwner&&view.isAdmin&&view.owner==='legacy-owner'&&Array.isArray(view.admins)&&view.admins.length===0,'oldClub club gains an empty admin list');
     const added=await oldClub.dispatchFetch(origin+'/api/club',{method:'POST',headers:await headers('owner'),body:JSON.stringify({action:'addPlayer',revision:view.revision,...fields,name:'New signing',team:'black'})});
     ok(added.status===200,'owner keeps admin rights after migration');
+    ok(JSON.stringify(view.teams)===JSON.stringify(model.DEFAULT_TEAMS),'legacy club gains the default team details');
   }finally{await oldClub.dispose()}
   console.log(JSON.stringify({passed:checks,productionDataTouched:false}));
 }finally{await mf.dispose()}

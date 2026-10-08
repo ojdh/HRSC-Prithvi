@@ -1,0 +1,2 @@
+-- Team names, colours, letters and mottos move from code into the club so admins can edit them; existing clubs keep today's values.
+UPDATE club SET data=json_set(data,'$.teams',json('{"red":{"name":"Team Red","color":"#ff666b","letter":"R","motto":"Bring the fire."},"black":{"name":"Team Black","color":"#171918","letter":"B","motto":"Own the moment."},"white":{"name":"Team White","color":"#eceddf","letter":"W","motto":"Make your mark."}}')),revision=revision+1 WHERE id=1 AND json_type(data,'$.teams') IS NULL;
