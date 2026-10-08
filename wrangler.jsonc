@@ -4,10 +4,12 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "hrsc-prithvi",
-  "main": "vinext/server/fetch-handler",
+  "main": "worker/index.ts",
   "compatibility_date": "2026-05-15",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
+  // Daily R2 clean-up run by worker/index.ts. Cron Triggers are part of Workers Free.
+  "triggers": { "crons": ["17 9 * * *"] },
   "workers_dev": false,
   "routes": [{ "pattern": "prithvifc.ca", "custom_domain": true }],
   "d1_databases": [
