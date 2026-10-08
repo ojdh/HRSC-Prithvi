@@ -245,6 +245,8 @@ footer{color:var(--muted);font-size:.9rem;margin-top:48px;border-top:1px solid v
 <p><strong>How</strong> (<code>wrangler.jsonc</code>):</p>
 <ul>
   <li><strong>Worker name:</strong> <code>hrsc-prithvi</code>, built by <code>pnpm build</code> into <code>dist/</code>.</li>
+  <li><strong>Entry:</strong> <code>worker/index.ts</code>. It hands every request to vinext's fetch handler and adds a <code>scheduled</code> handler for the daily storage clean-up (section 7).</li>
+  <li><strong>Daily Cron Trigger:</strong> <code>triggers: { crons: ["17 9 * * *"] }</code> runs the clean-up once a day at 09:17 UTC. Cron Triggers are part of Workers Free, so this adds no product or cost.</li>
   <li><strong>Address:</strong> <code>routes: [{ pattern: "prithvifc.ca", custom_domain: true }]</code>. The deploy attaches the domain and creates its DNS record, so there's no clicking around in the dashboard.</li>
   <li><strong>No second address:</strong> <code>workers_dev: false</code> turns off the extra <code>*.workers.dev</code> address, so the site lives at exactly one URL.</li>
   <li><strong>Settings and secrets:</strong> the database ID, Access team URL, AUD tag and R2 limits are plain <code>vars</code>, not secrets. The Club members group ID for Access sync is a <code>var</code> too. The secrets, <code>CLUB_SETUP_KEY</code>, <code>CF_ACCOUNT_ID</code> and <code>CF_API_TOKEN</code>, are set separately with <code>wrangler secret put</code> and never stored in the repo.</li>
@@ -269,7 +271,8 @@ footer{color:var(--muted);font-size:.9rem;margin-top:48px;border-top:1px solid v
 <ul>
   <li><strong><code>putObject</code></strong> (photo or clip upload): adds one Class A operation to this month's count in D1 and reserves the file's bytes in a ledger, then uploads. If either would go past its limit, the upload is refused.</li>
   <li><strong><code>getObject</code></strong> (showing a photo, or one video chunk of up to 1 MB): adds one Class B operation first.</li>
-  <li><strong><code>deleteObject</code></strong>: deleting is free in R2. The ledger row is removed only after R2 confirms the delete, so a failed delete keeps being counted. Over-counting is the safe side.</li>
+  <li><strong><code>deleteObject</code></strong>: deleting is free in R2. The ledger row is removed only after R2 confirms the delete, so a failed delete keeps being counted. Over-counting is the safe side, and the daily clean-up retries the delete.</li>
+  <li><strong><code>cleanupStorage</code></strong> (the daily Cron Trigger): deletes every object in the ledger that the club no longer references, such as one whose delete failed or one left behind when an upload stored a file but the save after it failed. References are player photos, player highlights, team photos and matchday clips. Objects stored in the last hour are left alone, since their upload may still be saving. It works from the ledger (<code>r2_objects</code>, whose <code>created_at</code> column comes from migration <code>0007</code>), so it makes no R2 list call, and deletes are free. It logs counts only.</li>
   <li><strong>Checks come first:</strong> the file is validated and the user's sign-in and permissions are checked before anything is charged. A bad upload or a stranger costs nothing.</li>
   <li><strong>Missing limits:</strong> every upload and view is refused (fails closed).</li>
 </ul>
@@ -300,12 +303,12 @@ footer{color:var(--muted);font-size:.9rem;margin-top:48px;border-top:1px solid v
     <tr><td>Per file (in the routes)</td><td>Photo 2 MB, clip 20 MB</td><td>n/a</td><td>That file is refused</td></tr>
   </tbody>
 </table></div>
-<p>The gap below the free tier covers anything done outside the app, such as files uploaded by hand from the dashboard, plus any orphaned objects.</p>
+<p>The gap below the free tier covers anything done outside the app, such as files uploaded by hand from the dashboard, plus any orphaned objects waiting for the next clean-up.</p>
 <p><strong>How the rule is kept:</strong></p>
 <ul>
   <li><code>tests/r2-boundary.mjs</code> fails CI if any file other than <code>lib/r2-budget.ts</code> mentions the bucket.</li>
   <li><code>AGENTS.md</code> states the free-tier rules for anyone changing the code, human or AI. <code>CLAUDE.md</code> just imports it.</li>
-  <li>The integration test runs a deliberately tight budget and checks that each limit is enforced, that refused uploads store nothing, that deletes free up space, and that missing limits fail closed.</li>
+  <li>The integration test runs a deliberately tight budget and checks that each limit is enforced, that refused uploads store nothing, that deletes free up space, and that missing limits fail closed. It also runs the daily clean-up and checks that it removes orphans, keeps referenced and recent files, and retries a failed delete.</li>
 </ul>
 <p><strong>Created as:</strong> bucket <code>hrsc-prithvi-media</code> in Western North America, after R2 was turned on in the dashboard. It started with 0 objects, so the ledger matches reality from day one.</p>
 <p><strong>Known limit:</strong> one signed-in player who uploads over and over could use up the month's upload allowance, pausing uploads for everyone until the month ends. It wouldn't cost money, and there are no per-user limits yet.</p>

@@ -1,0 +1,2 @@
+-- Players record a birth year and month instead of an age; existing ages are cleared rather than guessed into a birth date.
+UPDATE club SET data=json_set(data,'$.players',json(COALESCE((SELECT json_group_array(json(json_remove(value,'$.age'))) FROM json_each(club.data,'$.players')),'[]'))),revision=revision+1 WHERE id=1 AND EXISTS (SELECT 1 FROM json_each(club.data,'$.players') WHERE json_type(value,'$.age') IS NOT NULL);

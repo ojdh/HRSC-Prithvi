@@ -1,8 +1,9 @@
 // Runs against an isolated Worker/D1/R2 emulator. Never touches the hosted club.
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
-import {readFile,readdir} from 'node:fs/promises';
-import {resolve} from 'node:path';
+import {mkdtemp,readFile,readdir,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join,resolve} from 'node:path';
 const require=createRequire(import.meta.url);
 const workerRequire=createRequire(require.resolve('wrangler/package.json'));
 const {Miniflare}=workerRequire('miniflare');
@@ -48,7 +49,7 @@ try{
   await success('initialize',{key:'test-setup-secret',name:'Organiser',team:'red'});
   ok((await get(null)).data.players.length===0,'anonymous visitors see no roster');
   ok((await get('intruder')).data.players.length===0,'unlinked accounts see no roster');
-  const fields={age:25,height:170,district:'Kathmandu',position:'Midfielder'};
+  const fields={birthYear:2000,birthMonth:5,height:170,district:'Kathmandu',position:'Midfielder'};
   await success('addPlayer',{...fields,name:'Red teammate',team:'red'});
   await success('addPlayer',{...fields,name:'Black player',team:'black'});
   await success('addPlayer',{...fields,name:'White player',team:'white'});
@@ -80,7 +81,7 @@ try{
   ok((await post('profile',{...fields,name:'Black player',team:'red'},'black-user')).status===403,'players cannot switch team through profile editing');
   ok((await get('black-user')).data.players.find(p=>p.id===black.id).team==='black','player cannot switch team');
   const beforeProfile=(await get()).data;
-  const personal={name:'Black player updated',age:26,height:181,district:'Pokhara',position:'Forward'};
+  const personal={name:'Black player updated',birthYear:1999,birthMonth:12,height:181,district:'Pokhara',position:'Forward'};
   await success('profile',personal,'black-user');
   const afterProfile=(await get()).data;
   const changed=afterProfile.players.find(p=>p.id===black.id);
@@ -92,6 +93,13 @@ try{
   }
   ok((await post('profile',personal,'intruder')).status===403,'unlinked account cannot edit a player');
   ok((await post('profile',{...personal,height:999},'black-user')).status===400,'profile validates personal information');
+  const thisYear=Number(new Date().toLocaleDateString('en-CA',{timeZone:'America/Edmonton'}).slice(0,4));
+  for(const bad of [{birthMonth:0},{birthMonth:13},{birthMonth:5.5},{birthYear:1939},{birthYear:thisYear-4},{birthYear:'2000'},{birthYear:2000,birthMonth:null},{birthYear:null,birthMonth:5}])ok((await post('profile',{...personal,...bad},'black-user')).status===400,'invalid birth year or month rejected: '+JSON.stringify(bad));
+  ok((await post('addPlayer',{...fields,birthMonth:null,name:'Half birthday',team:'red'})).status===400,'admins also need both birth year and month, or neither');
+  ok((await post('profile',{...personal,age:30},'black-user')).status===403,'age is no longer a profile field');
+  await success('profile',{...personal,birthYear:null,birthMonth:null},'black-user');
+  ok((await get()).data.players.find(p=>p.id===black.id).birthYear===null,'birth year and month can both be cleared');
+  await success('profile',personal,'black-user');
   ok((await post('profile',personal,'black-user',beforeProfile.revision)).status===409,'stale profile save cannot overwrite newer records');
   const legacy=await mf.dispatchFetch(origin+'/?view=vote&day=legacy',{redirect:'manual'});
   ok(legacy.status>=300&&legacy.status<400&&legacy.headers.get('location')==='/winterleague?view=vote&day=legacy','old voting links redirect to the league');
@@ -247,11 +255,32 @@ try{
   const photoRes=await mf.dispatchFetch(origin+'/api/photo?key='+encodeURIComponent(photo),{headers:await headers('black-user')});
   ok(photoRes.status===200&&photoRes.headers.get('content-type')==='image/png','stored photo served');
   ok((await mf.dispatchFetch(origin+'/api/photo?key='+encodeURIComponent(photo))).status===401,'photo needs sign-in');
+  // Player photos: a player removes their own; admins remove anyone's.
+  const removePhoto=async(user,playerId,extra={})=>(await mf.dispatchFetch(origin+'/api/photo?player='+encodeURIComponent(playerId),{method:'DELETE',headers:{...await headers(user),...extra}})).status;
+  const photoBucket=await mf.getR2Bucket('BUCKET'),ledger=async key=>(await (await mf.getD1Database('DB')).prepare('SELECT COUNT(*) AS n FROM r2_objects WHERE key=?').bind(key).first()).n;
+  ok(await removePhoto('white-user',black.id)===403,'players cannot remove another player\'s photo');
+  ok(await removePhoto(null,black.id)===401,'removing a photo needs sign-in');
+  ok(await removePhoto('black-user',black.id,{Origin:'https://evil.test'})===403,'photo removal must come from the club website');
+  ok((await get()).data.players.find(p=>p.id===black.id).photo===photo&&!!(await photoBucket.head(photo))&&await ledger(photo)===1,'refused photo removal leaves the photo and its object');
+  ok(await removePhoto('owner','missing-player')===404,'unknown player photo rejected');
+  ok(await removePhoto('black-user',black.id)===200,'player removes their own photo');
+  ok((await get()).data.players.find(p=>p.id===black.id).photo===null&&!(await photoBucket.head(photo))&&await ledger(photo)===0,'removed player photo and its object are gone');
+  ok(await removePhoto('black-user',black.id)===400,'removing a missing photo is rejected');
+  const again=await send(mf,'/api/photo','black-user',{photo:new File([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jq24AAAAASUVORK5CYII=','base64')],'avatar.png',{type:'image/png'})});
+  ok(again.status===200,'player uploads a new photo');
+  const secondPhoto=(await get()).data.players.find(p=>p.id===black.id).photo;
+  ok(await removePhoto('owner',black.id)===200&&!(await photoBucket.head(secondPhoto))&&(await get()).data.players.find(p=>p.id===black.id).photo===null,'admin removes another player\'s photo');
   const ts=require('typescript');const source=await readFile('lib/club.ts','utf8');const js=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ES2022,target:ts.ScriptTarget.ES2022}}).outputText;const model=await import('data:text/javascript;base64,'+Buffer.from(js).toString('base64'));
   ok(model.embedVideo('https://youtu.be/dQw4w9WgXcQ')==='https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ'&&!model.isVideoUrl('http://youtube.com/x')&&model.isVideoUrl('https://vimeo.com/1')&&model.weeklyDates('2026-09-13','2026-11-29').length===12,'video links and weekly dates');
   const played=(id,roster)=>({id,date:'2026-09-06',start:'07:00',end:'08:30',roster,opening:['red','black'],firstExit:'red',poll:'ready',rounds:[{id:'r',a:'red',b:'black',scoreA:0,scoreB:0,goals:[],lineup:[],exit:'red',winner:null}]});
   const [regular]=model.playerStats([{id:'p',name:'P',team:'red'}],[played('d1',[{id:'p',team:'red'}]),played('d2',[]),{...played('d3',[{id:'p',team:'red'}]),rounds:[]}]);
   ok(regular.attended===1&&regular.attendance===50,'attendance counts played matchdays only');
+  // Past matchdays archive: played days before today, newest first.
+  const onDate=(id,date,rounds=1)=>({...played(id,[]),date,rounds:played(id,[]).rounds.slice(0,rounds)});
+  const archive=model.pastMatchdays([onDate('sep06','2026-09-06'),onDate('sep20','2026-09-20'),onDate('sep13','2026-09-13'),onDate('today','2026-10-08'),onDate('future','2026-10-15')],'2026-10-08').map(d=>d.id);
+  ok(JSON.stringify(archive)==='["sep20","sep13","sep06"]','past matchdays list days before today, newest first');
+  ok(model.pastMatchdays([onDate('empty','2026-09-06',0)],'2026-10-08').length===0,'past matchdays skip days with no rounds');
+  ok(JSON.stringify(model.awardWinners([{candidate:'a',votes:3},{candidate:'b',votes:3},{candidate:'c',votes:1}]).map(w=>w.candidate))==='["a","b"]'&&model.awardWinners([]).length===0,'player of the day is everyone tied on the most votes');
   const squad=[{id:'r1',team:'red'},{id:'w1',team:'white'}];
   ok(JSON.stringify(model.teamsWithout(squad.map(p=>p.id),squad))==='["black"]'&&JSON.stringify(model.teamsWithout(['r1'],squad))==='["black","white"]'&&model.teamsWithout(['r1','w1','b1'],[...squad,{id:'b1',team:'black'}]).length===0,'matchday setup names the teams with nobody attending');
   // League table: 3 points a win, 1 a draw; GF, GA and GD add up over every game played.
@@ -269,6 +298,9 @@ try{
   ok(payload.scoreA===2&&payload.scoreB===1&&payload.goals.length===3&&JSON.stringify(payload.lineup)==='["p1","p2"]','round payload derives the score from goals');
   ok(model.gameClock({...draft,elapsed:60000,startedAt:1000},121000)===model.GAME_MS-180000&&model.gameClock({...draft,elapsed:60000,startedAt:null},999999)===model.GAME_MS-60000&&model.gameClock({...draft,elapsed:0,startedAt:0},model.GAME_MS*2)===0,'game clock counts down, pauses, and stops at zero');
   ok(model.draftKey('d1',3)!==model.draftKey('d1',4)&&model.draftKey('d1',3)!==model.draftKey('d2',3),'each game of each day has its own draft');
+  // Ages come from birth year and month; the birthday counts as reached on the first of its month.
+  ok(model.ageFrom(2000,5,'2026-05-01')===26&&model.ageFrom(2000,6,'2026-05-31')===25&&model.ageFrom(2000,12,'2026-11-30')===25&&model.ageFrom(2000,12,'2026-12-01')===26&&model.ageFrom(2000,1,'2027-01-15')===27&&model.ageFrom(null,null,'2026-05-01')===null&&model.ageFrom(2000,null,'2026-05-01')===null,'age counts whole years from birth year and month');
+  ok(model.isBirthMonth({birthYear:2000,birthMonth:12},'2026-12-31')&&!model.isBirthMonth({birthYear:2000,birthMonth:1},'2026-12-31')&&model.isBirthMonth({birthYear:2000,birthMonth:1},'2027-01-01')&&!model.isBirthMonth({birthYear:null,birthMonth:null},'2026-12-01')&&!model.isBirthMonth({},'2026-12-01'),'birthday month spans the month boundary correctly');
   ok(model.teamInk('#171918')==='#fffef9'&&model.teamInk('#eceddf')==='#173322'&&model.teamInk('#ff666b')==='#173322','crest text picks the more legible ink');
   const t=model.teamStats(state.days),p=model.playerStats(state.players,state.days);
   ok(t.find(x=>x.team==='red').wins===1&&t.find(x=>x.team==='black').wins===1,'team wins derived correctly');
@@ -298,6 +330,65 @@ try{
   ok((await mf.dispatchFetch(origin+'/api/photo?team=black',{method:'DELETE',headers:await headers('black-user')})).status===403,'players cannot remove team photos');
   ok((await mf.dispatchFetch(origin+'/api/photo?team=black',{method:'DELETE',headers:await headers('owner')})).status===200,'admin removes a team photo');
   ok(!(await get()).data.teams.black.photo&&!(await bucket.head(secondCrest)),'removed team photo and its object are gone');
+  // Correcting a played game, the admin-only edit log, and deleting a played matchday.
+  const d1=await mf.getD1Database('DB'),rowsFor=async(table,day)=>(await d1.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE day=?`).bind(day).first('n'));
+  const dayOf=async(id,user='owner')=>(await get(user)).data.days.find(d=>d.id===id);
+  const editDay=series.dayIds[0];
+  await success('setupDay',{dayId:editDay,roster,a:'red',b:'black',firstExit:'red'});
+  await success('addRound',{dayId:editDay,scoreA:1,scoreB:0,lineup:[owner.id,black.id],goals:[goal('red',owner.id)]});
+  await success('addRound',{dayId:editDay,scoreA:0,scoreB:1,lineup:[owner.id,white.id],goals:[goal('white',white.id)]});
+  let edited=(await dayOf(editDay)).rounds;
+  const editBody=(round,scoreA,scoreB,goals,lineup)=>({dayId:editDay,roundId:round.id,scoreA,scoreB,goals,lineup});
+  for(const [action,body] of [['editRound',editBody(edited[0],0,0,[],[owner.id,black.id])],['requestDayDeletion',{dayId:editDay}],['approveDayDeletion',{dayId:editDay}],['cancelDayDeletion',{dayId:editDay}]])
+    ok((await post(action,body,'absent-user')).status===403,'players cannot '+action);
+  ok((await post('editRound',editBody(edited[0],2,0,[goal('black',black.id),goal('black',black.id)],[owner.id,black.id]))).status===400,'edited goals must match the edited score');
+  ok((await post('editRound',editBody(edited[1],1,0,[goal('red',owner.id)],[owner.id,black.id]))).status===400,'edited lineup must come from that round’s two teams');
+  ok((await post('editRound',{...editBody(edited[0],0,0,[],[owner.id,black.id]),roundId:'missing'})).status===400,'unknown round cannot be edited');
+  await success('editRound',editBody(edited[0],0,2,[goal('black',black.id),goal('black',null)],[owner.id,black.id]));
+  edited=(await dayOf(editDay)).rounds;
+  ok(edited[0].winner==='black'&&edited[0].exit==='red'&&edited[0].scoreB===2&&edited[0].goals.length===2,'editing a game recomputes its winner');
+  ok(edited[1].a==='red'&&edited[1].b==='white'&&edited[1].winner==='white','later games stay as they were played');
+  ok(JSON.stringify(model.nextMatch(await dayOf(editDay)))===JSON.stringify({a:'white',b:'black',waiting:'red',incumbent:'white'}),'next match before editing the last game');
+  await success('editRound',editBody(edited[1],2,0,[goal('red',owner.id),goal('red',owner.id)],[owner.id,white.id]));
+  const nextAfterEdit=model.nextMatch(await dayOf(editDay));
+  ok(nextAfterEdit.a==='red'&&nextAfterEdit.b==='black'&&nextAfterEdit.waiting==='white','editing the last game changes the next match');
+  await success('editRound',editBody(edited[1],0,0,[],[owner.id,white.id]));
+  ok((await dayOf(editDay)).rounds[1].exit==='red','a drawn edit sends off the team that had stayed on, replayed from earlier games');
+  await success('editRound',editBody(edited[0],1,1,[goal('red',owner.id),goal('black',black.id)],[owner.id,black.id]));
+  ok((await dayOf(editDay)).rounds[0].exit==='red','a drawn first game sends off the chosen first draw exit');
+  const ownerView=(await get()).data,editLog=ownerView.log.filter(e=>e.dayId===editDay&&e.action==='editRound');
+  ok(editLog.length===4&&editLog[0].by===owner.id&&editLog[0].roundId===edited[0].id&&editLog[0].before.scoreB===2&&editLog[0].after.scoreA===1&&editLog[0].date==='2026-09-13'&&Date.parse(editLog[0].at)<=Date.now(),'edits are logged newest first with who, when, before and after');
+  ok(!('log' in (await get('absent-user')).data),'players never receive the edit log');
+  // Voting and a clip on the played day, so deletion has something to clean up.
+  await success('openPoll',{dayId:editDay});await success('vote',{dayId:editDay,candidate:owner.id},'black-user');
+  const editClip=(await dayOf(editDay)).videoKey;
+  ok(editClip&&await bucket.head(editClip)&&await rowsFor('ballots',editDay)===1&&await rowsFor('vote_receipts',editDay)===1,'played day has a ballot, a receipt and a clip');
+  ok((await post('deleteDay',{dayId:editDay})).status===400,'a played matchday cannot be cancelled outright');
+  ok((await post('requestDayDeletion',{dayId:series.dayIds[3]})).status===400,'unplayed days are cancelled, not put to approval');
+  for(const p of [red,white,black])await success('setAdmin',{playerId:p.id,admin:true});
+  await success('requestDayDeletion',{dayId:editDay},'red-user');
+  ok((await post('requestDayDeletion',{dayId:editDay},'white-user')).status===400,'a deletion is only requested once');
+  ok((await post('approveDayDeletion',{dayId:editDay},'red-user')).status===400,'the same admin cannot approve twice');
+  ok(!(await success('approveDayDeletion',{dayId:editDay},'white-user')).deleted,'an approval short of the threshold reports the day as kept');
+  const pending=await dayOf(editDay);
+  ok(pending&&pending.deletion.requestedBy===red.id&&pending.deletion.approvals.length===2,'two admin approvals do not delete a played matchday');
+  ok(!('deletion' in await dayOf(editDay,'absent-user')),'players never see deletion requests');
+  const third=await success('approveDayDeletion',{dayId:editDay},'black-user');
+  ok(!await dayOf(editDay)&&third.deleted===true,'a third admin approval deletes the matchday and says so');
+  ok(await rowsFor('ballots',editDay)===0&&await rowsFor('vote_receipts',editDay)===0,'deleting a matchday removes its ballots and receipts');
+  ok(!await bucket.head(editClip),'deleting a matchday removes its clip from storage');
+  const deletionLog=(await get()).data.log.filter(e=>e.dayId===editDay).map(e=>e.action);
+  ok(JSON.stringify(deletionLog.slice(0,4))===JSON.stringify(['deleteDay','approveDayDeletion','approveDayDeletion','requestDayDeletion'])&&(await get()).data.log[0].date==='2026-09-13','deletion steps are logged and the log outlives the day');
+  // Approvals count only people who are admins when the decision is made.
+  await success('requestDayDeletion',{dayId:lateDay},'red-user');await success('approveDayDeletion',{dayId:lateDay},'white-user');
+  await success('setAdmin',{playerId:white.id,admin:false});
+  await success('approveDayDeletion',{dayId:lateDay},'black-user');
+  ok(await dayOf(lateDay),'approvals from a former admin do not count');
+  await success('cancelDayDeletion',{dayId:lateDay},'black-user');
+  ok(!(await dayOf(lateDay)).deletion&&(await get()).data.log[0].action==='cancelDayDeletion','any admin can withdraw a deletion request');
+  ok((await post('approveDayDeletion',{dayId:lateDay},'red-user')).status===400,'a withdrawn request cannot be approved');
+  await success('requestDayDeletion',{dayId});
+  ok(!await dayOf(dayId)&&await rowsFor('ballots',dayId)===0&&await rowsFor('vote_receipts',dayId)===0,'the owner alone deletes a played matchday');
   const tight=new Miniflare({...workerOptions,bindings:{...accessBindings,...budget({storage:pngBytes.length+clipBytes.length,classA:4,classB:1})}});
   try{
     const ownerId=await setUp(tight);
@@ -320,6 +411,9 @@ try{
     const view=()=>tight.dispatchFetch(origin+'/api/photo?key='+encodeURIComponent(photoKey),{headers:ownerHeaders});
     ok((await view()).status===200,'photo view fits the Class B limit');
     ok((await view()).status===503,'view past the monthly Class B limit refused');
+    const objectsBeforeRemoval=await storedObjects(tight);
+    ok((await tight.dispatchFetch(origin+'/api/photo?player='+encodeURIComponent(ownerId),{method:'DELETE',headers:ownerHeaders})).status===200,'photo removal still works with every monthly R2 budget spent');
+    ok(await storedObjects(tight)===objectsBeforeRemoval-1,'removing a photo frees its storage');
   }finally{await tight.dispose()}
   const unbudgeted=new Miniflare({...workerOptions,bindings:accessBindings});
   try{
@@ -436,11 +530,52 @@ try{
     cfApi.calls=[];const refused=await call('invite',{playerId:pending.id});
     ok(refused.status===503&&/Access sync isn't configured/.test(refused.data.error)&&cfApi.calls.length===0,'placeholder group id fails loudly without calling Cloudflare: '+JSON.stringify(refused));
   }finally{await placeholderGroup.dispose()}
+  // Daily storage clean-up: the cron removes R2 objects nothing references, keeps
+  // referenced and freshly uploaded ones, and retries a delete that failed.
+  const storageDir=await mkdtemp(join(tmpdir(),'hrsc-cleanup-'));
+  const janitorOptions={...workerOptions,bindings:{...accessBindings,...budget({storage:1e9,classA:1e6,classB:1e7})},d1Persist:join(storageDir,'d1'),r2Persist:join(storageDir,'r2')};
+  const janitor=new Miniflare(janitorOptions);
+  try{
+    // Arrange: one stored object of every referenced kind, aged past the grace period, plus orphans a crash could leave
+    const ownerId=await setUp(janitor);
+    const clubOf=async()=>(await janitor.dispatchFetch(origin+'/api/club',{headers:await headers('owner')})).json();
+    const scheduledDay=await janitor.dispatchFetch(origin+'/api/club',{method:'POST',headers:await headers('owner'),body:JSON.stringify({action:'addDays',revision:(await clubOf()).revision,from:'2026-09-06',start:'07:00',end:'08:30'})});
+    const [cleanupDay]=(await scheduledDay.json()).dayIds;
+    ok((await send(janitor,'/api/photo','owner',{photo:photoFile()})).status===200,'clean-up fixture: player photo stored');
+    ok((await send(janitor,'/api/photo','owner',{target:'team',team:'red',photo:photoFile()})).status===200,'clean-up fixture: team photo stored');
+    ok((await send(janitor,'/api/video','owner',{target:'profile',playerId:ownerId,kind:'Goal',video:clipFile()})).status===200,'clean-up fixture: highlight stored');
+    ok((await send(janitor,'/api/video','owner',{target:'matchday',dayId:cleanupDay,video:clipFile()})).status===200,'clean-up fixture: matchday clip stored');
+    const fixture=await clubOf(),referenced=[fixture.players[0].photo,fixture.players[0].highlights[0].key,fixture.teams.red.photo,fixture.days[0].videoKey];
+    const ledger=await janitor.getD1Database('DB');
+    ok((await ledger.prepare('SELECT count(*) AS n FROM r2_objects WHERE created_at>=unixepoch()-60').first()).n===referenced.length,'uploads record when they were stored');
+    await ledger.prepare('UPDATE r2_objects SET created_at=unixepoch()-7200').run();
+    const orphans={old:'players/orphan-old',legacy:'videos/orphan-legacy',fresh:'players/orphan-fresh'};
+    for(const [key,age] of [[orphans.old,7200],[orphans.legacy,null],[orphans.fresh,60]]){
+      await (await janitor.getR2Bucket('BUCKET')).put(key,pngBytes);
+      await ledger.prepare('INSERT INTO r2_objects(key,bytes,created_at) VALUES(?1,?2,CASE WHEN ?3 IS NULL THEN NULL ELSE unixepoch()-?3 END)').bind(key,pngBytes.length,age).run();
+    }
+    const runCron=async()=>{const run=await (await janitor.getWorker()).scheduled({cron:'17 9 * * *'});assert.equal(run.outcome,'ok')};
+    const inLedger=async key=>!!(await (await janitor.getD1Database('DB')).prepare('SELECT 1 AS found FROM r2_objects WHERE key=?').bind(key).first());
+    const inBucket=async key=>!!(await (await janitor.getR2Bucket('BUCKET')).head(key));
+    // Act: a run while R2 deletes fail
+    await janitor.setOptions({...janitorOptions,r2Buckets:{}});
+    await runCron();
+    // Assert: the failed deletes keep their ledger rows, so storage stays counted
+    ok(await inLedger(orphans.old)&&await inLedger(orphans.legacy),'failed clean-up delete keeps the ledger row');
+    // Act: the next daily run, with R2 reachable again
+    await janitor.setOptions(janitorOptions);
+    await runCron();
+    // Assert
+    ok(!await inBucket(orphans.old)&&!await inLedger(orphans.old),'orphaned object and its ledger row removed');
+    ok(!await inBucket(orphans.legacy)&&!await inLedger(orphans.legacy),'orphan stored before upload times were recorded is removed');
+    ok(await inBucket(orphans.fresh)&&await inLedger(orphans.fresh),'object uploaded within the last hour kept');
+    for(const key of referenced)ok(await inBucket(key)&&await inLedger(key),'referenced object kept: '+key.split('/')[0]);
+  }finally{await janitor.dispose();await rm(storageDir,{recursive:true,force:true})}
   // Data migrations upgrade a club saved before them.
   const oldClub=new Miniflare({...workerOptions,bindings:accessBindings});
   try{
     await migrate(oldClub,f=>f<'0004');
-    await (await oldClub.getD1Database('DB')).prepare('INSERT INTO club (id,revision,data) VALUES (1,0,?)').bind(JSON.stringify({adminId:'owner',players:[{id:'legacy-owner',name:'Organiser',team:'red',userId:'owner',age:null,height:null,district:null,position:'All-rounder',photo:null}],days:[{id:'legacy-day',date:'2026-09-06',roster:[{id:'legacy-owner',team:'red'}],opening:['red','black'],firstExit:'red',rounds:[],poll:'ready'}]})).run();
+    await (await oldClub.getD1Database('DB')).prepare('INSERT INTO club (id,revision,data) VALUES (1,0,?)').bind(JSON.stringify({adminId:'owner',players:[{id:'legacy-owner',name:'Organiser',team:'red',userId:'owner',age:null,height:null,district:null,position:'All-rounder',photo:null},{id:'legacy-aged',name:'Aged player',team:'black',age:31,height:null,district:null,position:'Forward',photo:null}],days:[{id:'legacy-day',date:'2026-09-06',roster:[{id:'legacy-owner',team:'red'}],opening:['red','black'],firstExit:'red',rounds:[],poll:'ready'}]})).run();
     await migrate(oldClub,f=>f>='0004');
     const view=await (await oldClub.dispatchFetch(origin+'/api/club',{headers:await headers('owner')})).json();
     ok(view.isOwner&&view.isAdmin&&view.owner==='legacy-owner'&&Array.isArray(view.admins)&&view.admins.length===0,'oldClub club gains an empty admin list');
@@ -448,6 +583,7 @@ try{
     ok(added.status===200,'owner keeps admin rights after migration');
     ok(JSON.stringify(view.teams)===JSON.stringify(model.DEFAULT_TEAMS),'legacy club gains the default team details');
     ok(view.days[0].start==='07:00'&&view.days[0].end==='08:30'&&model.isReady(view.days[0]),'legacy match days keep their 7:00–8:30 slot and setup');
+    ok(view.players.length===2&&view.players.every(p=>!('age' in p))&&view.players.find(p=>p.id==='legacy-aged').name==='Aged player','ages are cleared from every player by the birth-month migration');
   }finally{await oldClub.dispose()}
   console.log(JSON.stringify({passed:checks,productionDataTouched:false}));
 }finally{await mf.dispose()}

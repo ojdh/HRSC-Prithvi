@@ -8,14 +8,23 @@ export const DEFAULT_TEAMS: Record<Team,TeamInfo> = {
 };
 export type Highlight = {id:string;key:string;kind:'Goal'|'Assist'|'Save'|'Skill'|'Foul'|'Other';note:string};
 // email is admin-set on an unclaimed player; accessEmail is the email the app added to the club-members Access group.
-export type Player = {id:string;name:string;team:Team;age:number|null;height:number|null;position:string;number?:number|null;district?:string|null;active?:boolean;photo:string|null;highlights?:Highlight[];userId?:string;inviteHash?:string;legacyInviteHash?:string;inviteToken?:string;linked?:boolean;email?:string|null;accessEmail?:string|null};
+export type Player = {id:string;name:string;team:Team;birthYear?:number|null;birthMonth?:number|null;height:number|null;position:string;number?:number|null;district?:string|null;active?:boolean;photo:string|null;highlights?:Highlight[];userId?:string;inviteHash?:string;legacyInviteHash?:string;inviteToken?:string;linked?:boolean;email?:string|null;accessEmail?:string|null};
 export type Goal = {team:Team;scorer:string|null;assist:string|null;ownGoal:boolean};
 export type Round = {id:string;a:Team;b:Team;scoreA:number;scoreB:number;goals:Goal[];lineup:string[];exit:Team;winner:Team|null;videoUrl?:string|null};
 // A scheduled day has an empty roster and no opening teams until it is set up on the day. start/end are club-local HH:MM.
-export type Day = {id:string;date:string;start:string;end:string;roster:{id:string;team:Team}[];opening:[Team,Team]|null;firstExit:Team|null;rounds:Round[];poll:'ready'|'open'|'closed';videoUrl?:string|null;videoKey?:string|null};
+export type Day = {id:string;date:string;start:string;end:string;roster:{id:string;team:Team}[];opening:[Team,Team]|null;firstExit:Team|null;rounds:Round[];poll:'ready'|'open'|'closed';videoUrl?:string|null;videoKey?:string|null;deletion?:DayDeletion};
+// A request to delete a played matchday. approvals holds player ids; the requester's counts as the first.
+export type DayDeletion = {requestedBy:string;approvals:string[]};
+export const DELETION_APPROVALS=3;
+// A game as the edit log records it: the score and goals, without the lineup.
+export type RoundSnapshot = Pick<Round,'a'|'b'|'scoreA'|'scoreB'|'winner'|'exit'|'goals'>;
+export type LogAction = 'editRound'|'undoRound'|'requestDayDeletion'|'approveDayDeletion'|'cancelDayDeletion'|'deleteDay';
+// Admin-only history of corrections and deletions, newest first. by is a player id; date keeps an entry readable once its day is gone.
+export type LogEntry = {id:string;at:string;by:string;action:LogAction;dayId:string;date:string;roundId?:string;before?:RoundSnapshot;after?:RoundSnapshot};
+export const LOG_LIMIT=500;
 // adminId is the owner's account: the only person who can grant or remove admin rights. admins holds player ids.
-export type Club = {adminId:string;admins:string[];teams:Record<Team,TeamInfo>;players:Player[];days:Day[]};
-export type PublicClub = {invitation?:{name:string;team:Team};players:Player[];days:Day[];revision:number;initialized:boolean;isAdmin:boolean;isOwner:boolean;owner:string|null;admins:string[];teams:Record<Team,TeamInfo>;me:string|null;polls:Record<string,{count:number;voted:boolean;tally:{candidate:string;votes:number}[]}>};
+export type Club = {adminId:string;admins:string[];teams:Record<Team,TeamInfo>;players:Player[];days:Day[];log?:LogEntry[]};
+export type PublicClub = {invitation?:{name:string;team:Team};players:Player[];days:Day[];revision:number;initialized:boolean;isAdmin:boolean;isOwner:boolean;owner:string|null;admins:string[];teams:Record<Team,TeamInfo>;me:string|null;log?:LogEntry[];polls:Record<string,{count:number;voted:boolean;tally:{candidate:string;votes:number}[]}>};
 export const emptyClub:PublicClub={players:[],days:[],revision:0,initialized:false,isAdmin:false,isOwner:false,owner:null,admins:[],teams:DEFAULT_TEAMS,me:null,polls:{}};
 // Teams with no attending player among `ids`: a matchday needs all three teams present.
 export function teamsWithout(ids:string[],players:{id:string;team:Team}[]){return TEAMS.filter(t=>!players.some(p=>p.team===t&&ids.includes(p.id)));}
@@ -28,6 +37,17 @@ export function nextMatch(day:ReadyDay):{a:Team;b:Team;waiting:Team;incumbent:Te
   const waiting=TEAMS.find(t=>t!==last.a&&t!==last.b)!;
   return {a:survivor,b:waiting,waiting:last.exit,incumbent:survivor};
 }
+// The team that had stayed on longer when round `index` was played: the first draw exit for the opening game,
+// otherwise whichever of that round's teams also played the game before it. Stored teams never change, so this
+// holds even after an earlier result is corrected.
+export function incumbentAt(day:ReadyDay,index:number):Team {
+  const round=day.rounds[index],previous=day.rounds[index-1];
+  if(!previous)return day.firstExit;
+  return round.a===previous.a||round.a===previous.b?round.a:round.b;
+}
+export const snapshot=({a,b,scoreA,scoreB,winner,exit,goals}:Round):RoundSnapshot=>({a,b,scoreA,scoreB,winner,exit,goals});
+// A played matchday is deleted only through approvals; an unplayed one can simply be cancelled.
+export const isPlayed=(day:Day)=>day.rounds.length>0||day.poll!=='ready';
 export function result(a:Team,b:Team,scoreA:number,scoreB:number,incumbent:Team){
   const winner=scoreA===scoreB?null:scoreA>scoreB?a:b;
   return {winner,exit:winner?(winner===a?b:a):incumbent};
@@ -69,9 +89,16 @@ export const MAX_SERIES_DAYS=52;
 export function validDate(date:string){const d=new Date(date+'T12:00:00Z');return /^\d{4}-\d{2}-\d{2}$/.test(date)&&!isNaN(d.valueOf())&&d.toISOString().slice(0,10)===date&&date>=SEASON_START;}
 // Every date from `from` to `to` inclusive that falls on from's weekday.
 export function weeklyDates(from:string,to:string){const dates:string[]=[];for(const d=new Date(from+'T12:00:00Z');d.toISOString().slice(0,10)<=to;d.setUTCDate(d.getUTCDate()+7))dates.push(d.toISOString().slice(0,10));return dates;}
+// Whole years since a birth year and month (1-12) as of `today` (YYYY-MM-DD). Only the month is known, so the birthday counts as reached from the first of its month.
+export function ageFrom(year:number|null|undefined,month:number|null|undefined,today:string){if(!year||!month)return null;const [y,m]=today.split('-').map(Number);return y-year-(m<month?1:0);}
+export function isBirthMonth(p:Pick<Player,'birthMonth'>,today:string){return !!p.birthMonth&&Number(today.slice(5,7))===p.birthMonth;}
 export function clubToday(){return new Date().toLocaleDateString('en-CA',{timeZone:'America/Edmonton'});}
 // Today's match day, else the next upcoming one, else the most recent.
 export function currentDay(days:Day[],today:string){const sorted=[...days].sort((a,b)=>a.date.localeCompare(b.date));return sorted.find(d=>d.date>=today)??sorted.at(-1);}
+// Played matchdays (at least one round) before today, newest first.
+export function pastMatchdays(days:Day[],today:string){return days.filter(d=>d.date<today&&d.rounds.length).sort((a,b)=>b.date.localeCompare(a.date));}
+// Player of the day: everyone tied on the most votes. A closed poll's tally arrives sorted by votes, highest first.
+export function awardWinners(tally:{candidate:string;votes:number}[]){const max=tally[0]?.votes||0;return tally.filter(x=>x.votes===max);}
 export function timeLabel(day:Day){return clockLabel(day.start)+'–'+clockLabel(day.end);}
 export const VIDEO_HOSTS=['youtube.com','www.youtube.com','youtu.be','vimeo.com','www.vimeo.com','drive.google.com'];
 export function isVideoUrl(url:string){try{const u=new URL(url);return u.protocol==='https:'&&VIDEO_HOSTS.includes(u.hostname);}catch{return false;}}

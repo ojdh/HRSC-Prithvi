@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "51217f59-84cf-49bf-9862-74e8baecbaf0",
-  "prevId": "71651479-aa94-425b-b768-b90b80b0fb73",
+  "id": "0281c0f5-6cd4-492d-86ca-6a1ab41d720e",
+  "prevId": "51217f59-84cf-49bf-9862-74e8baecbaf0",
   "tables": {
     "ballots": {
       "name": "ballots",

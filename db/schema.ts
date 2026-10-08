@@ -9,4 +9,5 @@ export const maintenanceEvents = sqliteTable('maintenance_events',{id:text('id')
 export const r2Usage = sqliteTable('r2_usage',{month:text('month').primaryKey(),classA:integer('class_a').notNull().default(0),classB:integer('class_b').notNull().default(0)});
 // One row while the app changes the Cloudflare Access group, so two changes never overwrite each other (lib/access-sync.ts).
 export const accessSyncLock = sqliteTable('access_sync_lock',{id:integer('id').primaryKey(),token:text('token').notNull(),expires:integer('expires').notNull()});
-export const r2Objects =sqliteTable('r2_objects',{key:text('key').primaryKey(),bytes:integer('bytes').notNull()});
+// created_at is unix seconds; rows stored before migration 0007 have none and count as old.
+export const r2Objects = sqliteTable('r2_objects',{key:text('key').primaryKey(),bytes:integer('bytes').notNull(),createdAt:integer('created_at')});
