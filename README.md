@@ -73,6 +73,8 @@ Football photograph: Emilio Garcia, https://unsplash.com/photos/man-playing-socc
 
 The first organiser is the club owner. From Control room the owner can make any connected, active player an admin (up to 10) and remove that right again; only the owner can do this, and the owner cannot be demoted. Removing a player from the roster also removes their admin right, and restoring them does not bring it back. Admins have every other organiser power.
 
+The club always has three team slots. Admins rename them and set each team's crest letter, colour and motto from the squad headers in Control room; text colour on and around the crest is chosen for contrast. Player assignments, rosters and results are unaffected by renaming. The public homepage keeps the default team names because anonymous visitors do not receive club data.
+
 The organiser and admins manage roster details (including district), invitations, archival and restoration, matches, goals, assists, videos and voting from Control room. Archiving a player keeps their historical statistics and account mapping. The organiser can open a player profile through the Players screen and post short Goal, Assist, Save, Skill or Foul clips. Players edit their own name, age, height, district, position and portrait from My profile. They cannot change teams, match records, accounts, invitations or video clips. The server derives the editable player from the signed-in account.
 
 ## Editing the website

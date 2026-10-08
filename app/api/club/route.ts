@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { z } from 'zod';
 import { getUser } from '../../auth';
-import { TEAMS,nextMatch,result,emptyClub,type Club,type Day } from '@/lib/club';
+import { TEAMS,DEFAULT_TEAMS,nextMatch,result,emptyClub,type Club,type Day } from '@/lib/club';
 import { db,readClub,saveClub,check,digest,token,role,ClubError } from '@/lib/server-club';
 import {pendingInvite,findInvitation,inviteCookie} from '@/lib/server-invitations';
 export const dynamic='force-dynamic';
@@ -24,7 +24,7 @@ export async function GET(req:Request){try{
     const tally=day.poll==='closed'?tallies.filter(t=>t.day===day.id).map(({candidate,votes})=>({candidate,votes})):[];
     polls[day.id]={count:counts.find(x=>x.day===day.id)?.n??0,voted:mine.some(x=>x.day===day.id),tally};
   }
-  return response({initialized:true,revision,isAdmin:admin,isOwner:owner,owner:club.players.find(p=>p.userId===club.adminId)?.id??null,admins:club.admins,me:me?.id??null,players:club.players.map(({userId,inviteHash,legacyInviteHash,inviteToken,...p})=>({...p,linked:!!userId})),days:club.days,polls});
+  return response({initialized:true,revision,isAdmin:admin,isOwner:owner,owner:club.players.find(p=>p.userId===club.adminId)?.id??null,admins:club.admins,teams:club.teams,me:me?.id??null,players:club.players.map(({userId,inviteHash,legacyInviteHash,inviteToken,...p})=>({...p,linked:!!userId})),days:club.days,polls});
 }catch(e){return fail(e);}}
 export async function POST(req:Request){try{
   const origin=req.headers.get('origin');check(!origin||origin===new URL(req.url).origin,'This request must come from the club website.',403);
@@ -36,7 +36,7 @@ export async function POST(req:Request){try{
     const setup=z.object({key:z.string(),name:z.string().trim().min(1).max(60),team}).parse(body);
     const secret=(env as unknown as Record<string,string>).CLUB_SETUP_KEY;
     check(secret&&await digest(setup.key)===await digest(secret),'Enter the organiser setup code supplied with your site.',403);
-    const c:Club={adminId:user.userId,admins:[],players:[{id:crypto.randomUUID(),name:setup.name,team:setup.team,userId:user.userId,age:null,height:null,district:null,position:'All-rounder',number:null,photo:null}],days:[]};
+    const c:Club={adminId:user.userId,admins:[],teams:DEFAULT_TEAMS,players:[{id:crypto.randomUUID(),name:setup.name,team:setup.team,userId:user.userId,age:null,height:null,district:null,position:'All-rounder',number:null,photo:null}],days:[]};
     const r=await db().prepare('INSERT OR IGNORE INTO club (id,revision,data) VALUES (1,0,?)').bind(JSON.stringify(c)).run();
     check(r.meta.changes===1,'The club has already been set up.',409);return response({ok:true});
   }
@@ -85,6 +85,10 @@ export async function POST(req:Request){try{
         check(!club.days.some(d=>d.poll==='open'&&d.roster.some(r=>r.id===p.id)),'Close voting for this player’s match day before removing them.');
         p.active=false;club.admins=club.admins.filter(a=>a!==p.id);
       }else{check(p.active===false,'This player is already on the active roster.');p.active=true;}
+    }else if(action==='editTeam'){
+      const input=z.object({team,name:z.string().trim().min(1).max(30),letter:z.string().trim().min(1).max(2).transform(s=>s.toUpperCase()),color:z.string().regex(/^#[0-9a-fA-F]{6}$/,'Choose a colour like #1f7a4d.').transform(s=>s.toLowerCase()),motto:z.string().trim().max(60)}).parse(body);
+      check(TEAMS.every(t=>t===input.team||club.teams[t].name.toLowerCase()!==input.name.toLowerCase()),'Each team needs its own name.');
+      club.teams[input.team]={name:input.name,color:input.color,letter:input.letter,motto:input.motto};
     }else if(action==='invite'){
       const p=club.players.find(p=>p.id===body.playerId&&p.active!==false);check(p,'Active player not found.');check(!p.userId,'This player already has an account.');
       if(!p.inviteToken){if(p.inviteHash)p.legacyInviteHash=p.inviteHash;p.inviteToken=token();p.inviteHash=await digest(p.inviteToken);}extra={invite:p.inviteToken};

@@ -1,6 +1,7 @@
 export const TEAMS = ['red','black','white'] as const;
 export type Team = typeof TEAMS[number];
-export const TEAM: Record<Team,{name:string; color:string; letter:string; motto:string}> = {
+export type TeamInfo = {name:string; color:string; letter:string; motto:string};
+export const DEFAULT_TEAMS: Record<Team,TeamInfo> = {
   red:{name:'Team Red',color:'#ff666b',letter:'R',motto:'Bring the fire.'},
   black:{name:'Team Black',color:'#171918',letter:'B',motto:'Own the moment.'},
   white:{name:'Team White',color:'#eceddf',letter:'W',motto:'Make your mark.'},
@@ -11,9 +12,9 @@ export type Goal = {team:Team;scorer:string|null;assist:string|null;ownGoal:bool
 export type Round = {id:string;a:Team;b:Team;scoreA:number;scoreB:number;goals:Goal[];lineup:string[];exit:Team;winner:Team|null};
 export type Day = {id:string;date:string;roster:{id:string;team:Team}[];opening:[Team,Team];firstExit:Team;rounds:Round[];poll:'ready'|'open'|'closed';videoUrl?:string|null;videoKey?:string|null};
 // adminId is the owner's account: the only person who can grant or remove admin rights. admins holds player ids.
-export type Club = {adminId:string;admins:string[];players:Player[];days:Day[]};
-export type PublicClub = {invitation?:{name:string;team:Team};players:Player[];days:Day[];revision:number;initialized:boolean;isAdmin:boolean;isOwner:boolean;owner:string|null;admins:string[];me:string|null;polls:Record<string,{count:number;voted:boolean;tally:{candidate:string;votes:number}[]}>};
-export const emptyClub:PublicClub={players:[],days:[],revision:0,initialized:false,isAdmin:false,isOwner:false,owner:null,admins:[],me:null,polls:{}};
+export type Club = {adminId:string;admins:string[];teams:Record<Team,TeamInfo>;players:Player[];days:Day[]};
+export type PublicClub = {invitation?:{name:string;team:Team};players:Player[];days:Day[];revision:number;initialized:boolean;isAdmin:boolean;isOwner:boolean;owner:string|null;admins:string[];teams:Record<Team,TeamInfo>;me:string|null;polls:Record<string,{count:number;voted:boolean;tally:{candidate:string;votes:number}[]}>};
+export const emptyClub:PublicClub={players:[],days:[],revision:0,initialized:false,isAdmin:false,isOwner:false,owner:null,admins:[],teams:DEFAULT_TEAMS,me:null,polls:{}};
 export function nextMatch(day:Day):{a:Team;b:Team;waiting:Team;incumbent:Team} {
   const last=day.rounds.at(-1);
   if(!last){const [a,b]=day.opening;return {a,b,waiting:TEAMS.find(t=>t!==a&&t!==b)!,incumbent:day.firstExit};}
@@ -48,3 +49,10 @@ export function playerStats(players:Player[],days:Day[]){
 }
 export function dateLabel(date:string,short=false){return new Intl.DateTimeFormat('en-CA',{month:short?'short':'long',day:'numeric',...(short?{}:{year:'numeric'}),timeZone:'UTC'}).format(new Date(date+'T12:00:00Z'));}
 export function upcomingSunday(){const today=new Date().toLocaleDateString('en-CA',{timeZone:'America/Edmonton'});let d=new Date(today+'T12:00:00Z');if(today<'2026-09-01')return '2026-09-06';d.setUTCDate(d.getUTCDate()+(7-d.getUTCDay())%7);return d.toISOString().slice(0,10);}
+const LIGHT_INK='#fffef9',DARK_INK='#173322',PAGE='#fffefa';
+// Text drawn on a team-coloured fill: whichever of the club's light or dark ink reads better.
+export function teamInk(color:string){return contrast(color,LIGHT_INK)>=contrast(color,DARK_INK)?LIGHT_INK:DARK_INK;}
+// CSS variables for a team: its fill, legible ink on that fill, and a text colour legible on the page.
+export function teamStyle(t:TeamInfo):Record<string,string>{return {'--team-color':t.color,'--team-ink':teamInk(t.color),'--team-text':contrast(t.color,PAGE)>=3?t.color:`color-mix(in srgb,${t.color} 45%,${DARK_INK})`};}
+function luminance(hex:string){const [r,g,b]=[1,3,5].map(i=>{const c=parseInt(hex.slice(i,i+2),16)/255;return c<=0.03928?c/12.92:((c+0.055)/1.055)**2.4;});return 0.2126*r+0.7152*g+0.0722*b;}
+function contrast(a:string,b:string){const [hi,lo]=[luminance(a),luminance(b)].sort((x,y)=>y-x);return (hi+0.05)/(lo+0.05);}
