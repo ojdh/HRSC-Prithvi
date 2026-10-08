@@ -1,6 +1,6 @@
 import { getUser } from '../../auth';
 import { readClub,saveClub,check,role,ClubError } from '@/lib/server-club';
-import { TEAMS,type Team } from '@/lib/club';
+import { TEAMS,type Club,type Team } from '@/lib/club';
 import { deleteObject,getObject,putObject } from '@/lib/r2-budget';
 export const dynamic='force-dynamic';
 export async function POST(req:Request){let key:string|undefined;try{
@@ -25,7 +25,10 @@ export async function GET(req:Request){try{
 export async function DELETE(req:Request){try{
   check(req.headers.get('origin')===new URL(req.url).origin,'Invalid origin.',403);
   const user=await getUser();check(user,'Sign in first.',401);const stored=await readClub();check(stored,'Club not found.',404);
-  check(role(stored.club,user.userId).admin,'Only club admins can change team photos.',403);
-  const team=new URL(req.url).searchParams.get('team') as Team;check(TEAMS.includes(team),'Team not found.');const previous=stored.club.teams[team].photo;check(previous,'This team has no photo.');
-  stored.club.teams[team].photo=null;await saveClub(stored.club,stored.revision);await deleteObject(previous);return Response.json({ok:true});
+  const params=new URL(req.url).searchParams,playerId=params.get('player');
+  const owner=playerId===null?photoTeam(stored.club,user.userId,params.get('team')):photoPlayer(stored.club,user.userId,playerId);const previous=owner.photo;check(previous,playerId===null?'This team has no photo.':'This player has no photo.');
+  owner.photo=null;await saveClub(stored.club,stored.revision);await deleteObject(previous);return Response.json({ok:true});
 }catch(e){return Response.json({error:e instanceof ClubError?e.message:'The photo could not be removed. Please try again.'},{status:e instanceof ClubError?e.status:503});}}
+function photoTeam(club:Club,userId:string,team:string|null){check(role(club,userId).admin,'Only club admins can change team photos.',403);check(TEAMS.includes(team as Team),'Team not found.');return club.teams[team as Team];}
+// A player removes their own photo; admins can remove anyone's.
+function photoPlayer(club:Club,userId:string,playerId:string){const {me,admin}=role(club,userId);check(admin||me&&me.active!==false&&me.id===playerId,'You can only remove your own photo.',403);const player=club.players.find(p=>p.id===playerId);check(player,'Player not found.',404);return player;}

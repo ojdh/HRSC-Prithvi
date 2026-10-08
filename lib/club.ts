@@ -7,7 +7,7 @@ export const DEFAULT_TEAMS: Record<Team,TeamInfo> = {
   white:{name:'Team White',color:'#eceddf',letter:'W',motto:'Make your mark.'},
 };
 export type Highlight = {id:string;key:string;kind:'Goal'|'Assist'|'Save'|'Skill'|'Foul'|'Other';note:string};
-export type Player = {id:string;name:string;team:Team;age:number|null;height:number|null;position:string;number?:number|null;district?:string|null;active?:boolean;photo:string|null;highlights?:Highlight[];userId?:string;inviteHash?:string;legacyInviteHash?:string;inviteToken?:string;linked?:boolean};
+export type Player = {id:string;name:string;team:Team;birthYear?:number|null;birthMonth?:number|null;height:number|null;position:string;number?:number|null;district?:string|null;active?:boolean;photo:string|null;highlights?:Highlight[];userId?:string;inviteHash?:string;legacyInviteHash?:string;inviteToken?:string;linked?:boolean};
 export type Goal = {team:Team;scorer:string|null;assist:string|null;ownGoal:boolean};
 export type Round = {id:string;a:Team;b:Team;scoreA:number;scoreB:number;goals:Goal[];lineup:string[];exit:Team;winner:Team|null;videoUrl?:string|null};
 // A scheduled day has an empty roster and no opening teams until it is set up on the day. start/end are club-local HH:MM.
@@ -68,6 +68,9 @@ export const MAX_SERIES_DAYS=52;
 export function validDate(date:string){const d=new Date(date+'T12:00:00Z');return /^\d{4}-\d{2}-\d{2}$/.test(date)&&!isNaN(d.valueOf())&&d.toISOString().slice(0,10)===date&&date>=SEASON_START;}
 // Every date from `from` to `to` inclusive that falls on from's weekday.
 export function weeklyDates(from:string,to:string){const dates:string[]=[];for(const d=new Date(from+'T12:00:00Z');d.toISOString().slice(0,10)<=to;d.setUTCDate(d.getUTCDate()+7))dates.push(d.toISOString().slice(0,10));return dates;}
+// Whole years since a birth year and month (1-12) as of `today` (YYYY-MM-DD). Only the month is known, so the birthday counts as reached from the first of its month.
+export function ageFrom(year:number|null|undefined,month:number|null|undefined,today:string){if(!year||!month)return null;const [y,m]=today.split('-').map(Number);return y-year-(m<month?1:0);}
+export function isBirthMonth(p:Pick<Player,'birthMonth'>,today:string){return !!p.birthMonth&&Number(today.slice(5,7))===p.birthMonth;}
 export function clubToday(){return new Date().toLocaleDateString('en-CA',{timeZone:'America/Edmonton'});}
 // Today's match day, else the next upcoming one, else the most recent.
 export function currentDay(days:Day[],today:string){const sorted=[...days].sort((a,b)=>a.date.localeCompare(b.date));return sorted.find(d=>d.date>=today)??sorted.at(-1);}

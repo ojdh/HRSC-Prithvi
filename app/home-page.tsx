@@ -8,7 +8,7 @@ const teams=[{name:'Red',id:'red',number:'01',color:'#fc786e'},{name:'Black',id:
 const photos=[{src:'/matchday.webp',alt:'A football on a sunlit grass pitch with players in the distance',caption:'Early light.'},{src:'/pitch.jpg',alt:'Football boots and a ball on bright green grass',caption:'First touch.'}];
 const questions=[
   ['How does the Winter league work?','Red, Black and White rotate through short games. Two teams play; the winner stays and the other team rotates off. Each game lasts 10 minutes, whatever the score. After a draw, the team that has been on longest leaves. For a draw in the first game, the organiser picks who leaves.'],
-  ['Where do I find my profile?','Open the league and choose My profile. Sign in with your email and use the personal invitation from your organiser to connect your account. You can update your name, age, height, district, position and portrait there.'],
+  ['Where do I find my profile?','Open the league and choose My profile. Sign in with your email and use the personal invitation from your organiser to connect your account. You can update your name, birth year and month, height, district, position and portrait there.'],
   ['How do I vote for Player of the Day?','Your organiser opens voting after the game and shares the link. Choose one attending player from either of the other two teams. You have one anonymous vote; your own team cannot be selected.'],
   ['When do scores and videos appear?','The organiser adds results, goals, assists, match replays and individual highlights. Voting can open right after the session while scores are entered later.']
 ];

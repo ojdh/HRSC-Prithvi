@@ -10,7 +10,10 @@ const date=z.string().refine(validDate,'Choose a real date on or after September
 const slot=z.object({start:time,end:time}),endsAfterStart=[(v:{start:string;end:string})=>v.end>v.start,'The end time must be after the start time.'] as const;
 const videoUrl=z.string().trim().max(500).refine(v=>!v||isVideoUrl(v),'Use an HTTPS YouTube, Vimeo, or Google Drive video link.');
 const MAX_DAYS=300;
-const details=z.object({name:z.string().trim().min(1).max(60),age:z.number().int().min(5).max(100).nullable(),height:z.number().int().min(70).max(250).nullable(),district:z.string().trim().max(60).nullable(),position:z.enum(['Goalkeeper','Defender','Midfielder','Forward','All-rounder'])});
+const birthPair=[(v:{birthYear:number|null;birthMonth:number|null})=>(v.birthYear===null)===(v.birthMonth===null),'Choose both a birth year and month, or leave both empty.'] as const;
+// The latest allowed birth year follows the club calendar, so it is checked per request rather than fixed when the Worker starts.
+const birthYear=z.number().int().min(1940,'Choose a birth year from 1940 onwards.').refine(y=>y<=Number(clubToday().slice(0,4))-5,'Players must be at least five years old.');
+const details=z.object({name:z.string().trim().min(1).max(60),birthYear:birthYear.nullable(),birthMonth:z.number().int().min(1,'Choose a birth month.').max(12,'Choose a birth month.').nullable(),height:z.number().int().min(70).max(250).nullable(),district:z.string().trim().max(60).nullable(),position:z.enum(['Goalkeeper','Defender','Midfielder','Forward','All-rounder'])});
 function response(value:unknown,status=200){return Response.json(value,{status,headers:{'Cache-Control':'private, no-store'}});}
 function fail(e:unknown){if(e instanceof ClubError)return response({error:e.message},e.status);if(e instanceof z.ZodError)return response({error:e.issues[0].message},400);console.error('Club request failed',e instanceof Error?e.message:'unknown');return response({error:'We could not save or load that. Please retry; your form is still here.'},503);}
 export async function GET(req:Request){try{
@@ -40,7 +43,7 @@ export async function POST(req:Request){try{
     const setup=z.object({key:z.string(),name:z.string().trim().min(1).max(60),team}).parse(body);
     const secret=(env as unknown as Record<string,string>).CLUB_SETUP_KEY;
     check(secret&&await digest(setup.key)===await digest(secret),'Enter the organiser setup code supplied with your site.',403);
-    const c:Club={adminId:user.userId,admins:[],teams:DEFAULT_TEAMS,players:[{id:crypto.randomUUID(),name:setup.name,team:setup.team,userId:user.userId,age:null,height:null,district:null,position:'All-rounder',number:null,photo:null}],days:[]};
+    const c:Club={adminId:user.userId,admins:[],teams:DEFAULT_TEAMS,players:[{id:crypto.randomUUID(),name:setup.name,team:setup.team,userId:user.userId,birthYear:null,birthMonth:null,height:null,district:null,position:'All-rounder',number:null,photo:null}],days:[]};
     const r=await db().prepare('INSERT OR IGNORE INTO club (id,revision,data) VALUES (1,0,?)').bind(JSON.stringify(c)).run();
     check(r.meta.changes===1,'The club has already been set up.',409);return response({ok:true});
   }
@@ -66,9 +69,9 @@ export async function POST(req:Request){try{
     const p=await findInvitation(club,z.string().min(20).max(150).parse(body.token||pendingInvite(req)));check(p&&!p.userId,'This invitation has already been used or is unavailable. Ask your organiser for the current link.');p.userId=user.userId;delete p.inviteHash;delete p.legacyInviteHash;delete p.inviteToken;
   }else if(action==='profile'){
     check(me&&me.active!==false,'Only an active linked player can update their profile.',403);
-    const allowed=new Set(['action','revision','name','age','height','district','position']);
+    const allowed=new Set(['action','revision','name','birthYear','birthMonth','height','district','position']);
     check(Object.keys(body).every(key=>allowed.has(key)),'You can only update your own personal information.',403);
-    Object.assign(me,details.parse(body));
+    Object.assign(me,details.refine(...birthPair).parse(body));
   }else if(action==='setAdmin'){
     check(owner,'Only the club owner can change admins.',403);
     const input=z.object({playerId:id,admin:z.boolean()}).parse(body);const p=club.players.find(p=>p.id===input.playerId&&p.active!==false);check(p,'Active player not found.');
@@ -78,10 +81,10 @@ export async function POST(req:Request){try{
   }else{
     check(admin,'Only club admins can change match records and teams.',403);
     if(action==='addPlayer'){
-      const input=details.extend({team}).parse(body);check(club.players.length<150,'The club supports up to 150 players.');
+      const input=details.extend({team}).refine(...birthPair).parse(body);check(club.players.length<150,'The club supports up to 150 players.');
       club.players.push({...input,id:crypto.randomUUID(),active:true,photo:null});
     }else if(action==='editPlayer'){
-      const input=details.extend({team,id}).parse(body);const p=club.players.find(p=>p.id===input.id&&p.active!==false);check(p,'Active player not found.');Object.assign(p,input);
+      const input=details.extend({team,id}).refine(...birthPair).parse(body);const p=club.players.find(p=>p.id===input.id&&p.active!==false);check(p,'Active player not found.');Object.assign(p,input);
     }else if(action==='archivePlayer'||action==='restorePlayer'){
       const playerId=id.parse(body.playerId);const p=club.players.find(p=>p.id===playerId);check(p,'Player not found.');check(p.userId!==club.adminId,'The organiser cannot remove their own profile.');
       if(action==='archivePlayer'){
