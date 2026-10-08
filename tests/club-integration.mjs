@@ -104,6 +104,8 @@ try{
   ok((await post('addRound',{dayId,scoreA:0,scoreB:0,lineup:roster,goals:[]})).status===400,'rounds need a set-up match day');
   for(const bad of [{a:'red',b:'red'},{firstExit:'white'},{roster:[owner.id,red.id,black.id]}])ok((await post('setupDay',{dayId,roster,a:'red',b:'black',firstExit:'red',...bad})).status===400,'invalid matchday setup rejected: '+JSON.stringify(bad));
   await success('setupDay',{dayId,roster,a:'red',b:'black',firstExit:'red'});
+  const futureId=(await success('addDays',{from:'2099-01-04',start:'07:00',end:'08:30'})).dayIds[0];await success('setupDay',{dayId:futureId,roster,a:'red',b:'black',firstExit:'red'});
+  ok((await post('openPoll',{dayId:futureId})).status===400,'voting cannot open before the match day');await success('deleteDay',{dayId:futureId});
   await success('openPoll',{dayId});
   ok((await get()).data.days[0].rounds.length===0,'voting opens before any stats');
   ok((await post('setupDay',{dayId,roster:[...roster,absent.id],a:'red',b:'black',firstExit:'red'})).status===400,'vote eligibility roster locked');

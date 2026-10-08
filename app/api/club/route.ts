@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { z } from 'zod';
 import { getUser } from '../../auth';
-import { TEAMS,DEFAULT_TEAMS,MAX_SERIES_DAYS,nextMatch,result,emptyClub,isReady,isVideoUrl,validDate,weeklyDates,type Club,type Day } from '@/lib/club';
+import { TEAMS,DEFAULT_TEAMS,MAX_SERIES_DAYS,nextMatch,result,emptyClub,isReady,isVideoUrl,validDate,weeklyDates,clubToday,type Club,type Day } from '@/lib/club';
 import { db,readClub,saveClub,check,digest,token,role,ClubError } from '@/lib/server-club';
 import {pendingInvite,findInvitation,inviteCookie} from '@/lib/server-invitations';
 export const dynamic='force-dynamic';
@@ -129,7 +129,7 @@ export async function POST(req:Request){try{
     }else if(action==='undoRound'){
       const day=club.days.find(d=>d.id===body.dayId);check(day&&day.rounds.length,'There is no round to undo.');check(day.rounds.at(-1)?.id===body.roundId,'The latest round has changed. Refresh first.',409);day.rounds.pop();
     }else if(action==='openPoll'||action==='closePoll'){
-      const day=club.days.find(d=>d.id===body.dayId);check(day,'Match day not found.');check(action==='closePoll'||isReady(day),'Set attendance and opening teams first.');check(day.poll===(action==='openPoll'?'ready':'open'),'Voting has already changed.');day.poll=action==='openPoll'?'open':'closed';
+      const day=club.days.find(d=>d.id===body.dayId);check(day,'Match day not found.');check(action==='closePoll'||isReady(day),'Set attendance and opening teams first.');check(action==='closePoll'||day.date<=clubToday(),'Voting opens on or after the match day.');check(day.poll===(action==='openPoll'?'ready':'open'),'Voting has already changed.');day.poll=action==='openPoll'?'open':'closed';
     }else if(action==='setMatchVideo'){
       const day=club.days.find(d=>d.id===body.dayId);check(day,'Match day not found.');day.videoUrl=videoUrl.parse(body.videoUrl)||null;
     }else if(action==='setRoundVideo'){
