@@ -9,13 +9,16 @@ export const DEFAULT_TEAMS: Record<Team,TeamInfo> = {
 export type Highlight = {id:string;key:string;kind:'Goal'|'Assist'|'Save'|'Skill'|'Foul'|'Other';note:string};
 export type Player = {id:string;name:string;team:Team;age:number|null;height:number|null;position:string;number?:number|null;district?:string|null;active?:boolean;photo:string|null;highlights?:Highlight[];userId?:string;inviteHash?:string;legacyInviteHash?:string;inviteToken?:string;linked?:boolean};
 export type Goal = {team:Team;scorer:string|null;assist:string|null;ownGoal:boolean};
-export type Round = {id:string;a:Team;b:Team;scoreA:number;scoreB:number;goals:Goal[];lineup:string[];exit:Team;winner:Team|null};
-export type Day = {id:string;date:string;roster:{id:string;team:Team}[];opening:[Team,Team];firstExit:Team;rounds:Round[];poll:'ready'|'open'|'closed';videoUrl?:string|null;videoKey?:string|null};
+export type Round = {id:string;a:Team;b:Team;scoreA:number;scoreB:number;goals:Goal[];lineup:string[];exit:Team;winner:Team|null;videoUrl?:string|null};
+// A scheduled day has an empty roster and no opening teams until it is set up on the day. start/end are club-local HH:MM.
+export type Day = {id:string;date:string;start:string;end:string;roster:{id:string;team:Team}[];opening:[Team,Team]|null;firstExit:Team|null;rounds:Round[];poll:'ready'|'open'|'closed';videoUrl?:string|null;videoKey?:string|null};
 // adminId is the owner's account: the only person who can grant or remove admin rights. admins holds player ids.
 export type Club = {adminId:string;admins:string[];teams:Record<Team,TeamInfo>;players:Player[];days:Day[]};
 export type PublicClub = {invitation?:{name:string;team:Team};players:Player[];days:Day[];revision:number;initialized:boolean;isAdmin:boolean;isOwner:boolean;owner:string|null;admins:string[];teams:Record<Team,TeamInfo>;me:string|null;polls:Record<string,{count:number;voted:boolean;tally:{candidate:string;votes:number}[]}>};
 export const emptyClub:PublicClub={players:[],days:[],revision:0,initialized:false,isAdmin:false,isOwner:false,owner:null,admins:[],teams:DEFAULT_TEAMS,me:null,polls:{}};
-export function nextMatch(day:Day):{a:Team;b:Team;waiting:Team;incumbent:Team} {
+export type ReadyDay = Day&{opening:[Team,Team];firstExit:Team};
+export const isReady=(day:Day):day is ReadyDay=>!!day.opening&&!!day.firstExit;
+export function nextMatch(day:ReadyDay):{a:Team;b:Team;waiting:Team;incumbent:Team} {
   const last=day.rounds.at(-1);
   if(!last){const [a,b]=day.opening;return {a,b,waiting:TEAMS.find(t=>t!==a&&t!==b)!,incumbent:day.firstExit};}
   const survivor=last.a===last.exit?last.b:last.a;
@@ -48,7 +51,23 @@ export function playerStats(players:Player[],days:Day[]){
   }).sort((a,b)=>b.goals-a.goals||b.assists-a.assists||b.wins-a.wins||a.name.localeCompare(b.name));
 }
 export function dateLabel(date:string,short=false){return new Intl.DateTimeFormat('en-CA',{month:short?'short':'long',day:'numeric',...(short?{}:{year:'numeric'}),timeZone:'UTC'}).format(new Date(date+'T12:00:00Z'));}
-export function upcomingSunday(){const today=new Date().toLocaleDateString('en-CA',{timeZone:'America/Edmonton'});let d=new Date(today+'T12:00:00Z');if(today<'2026-09-01')return '2026-09-06';d.setUTCDate(d.getUTCDate()+(7-d.getUTCDay())%7);return d.toISOString().slice(0,10);}
+export const SEASON_START='2026-09-01';
+export const MAX_SERIES_DAYS=52;
+export function validDate(date:string){const d=new Date(date+'T12:00:00Z');return /^\d{4}-\d{2}-\d{2}$/.test(date)&&!isNaN(d.valueOf())&&d.toISOString().slice(0,10)===date&&date>=SEASON_START;}
+// Every date from `from` to `to` inclusive that falls on from's weekday.
+export function weeklyDates(from:string,to:string){const dates:string[]=[];for(const d=new Date(from+'T12:00:00Z');d.toISOString().slice(0,10)<=to;d.setUTCDate(d.getUTCDate()+7))dates.push(d.toISOString().slice(0,10));return dates;}
+export function clubToday(){return new Date().toLocaleDateString('en-CA',{timeZone:'America/Edmonton'});}
+// Today's match day, else the next upcoming one, else the most recent.
+export function currentDay(days:Day[],today:string){const sorted=[...days].sort((a,b)=>a.date.localeCompare(b.date));return sorted.find(d=>d.date>=today)??sorted.at(-1);}
+export function timeLabel(day:Day){return clockLabel(day.start)+'–'+clockLabel(day.end);}
+export const VIDEO_HOSTS=['youtube.com','www.youtube.com','youtu.be','vimeo.com','www.vimeo.com','drive.google.com'];
+export function isVideoUrl(url:string){try{const u=new URL(url);return u.protocol==='https:'&&VIDEO_HOSTS.includes(u.hostname);}catch{return false;}}
+export function embedVideo(url:string){try{const u=new URL(url);if(['youtube.com','www.youtube.com'].includes(u.hostname)){
+  const id=u.searchParams.get('v')||u.pathname.match(/^\/shorts\/([\w-]+)/)?.[1];return id&&/^[\w-]{6,20}$/.test(id)?'https://www.youtube-nocookie.com/embed/'+id:null;}
+  if(u.hostname==='youtu.be'&&/^[\w-]{6,20}$/.test(u.pathname.slice(1)))return 'https://www.youtube-nocookie.com/embed/'+u.pathname.slice(1);
+  if(['vimeo.com','www.vimeo.com'].includes(u.hostname)&&/^\d+$/.test(u.pathname.slice(1)))return 'https://player.vimeo.com/video/'+u.pathname.slice(1);
+  return null;}catch{return null;}}
+function clockLabel(time:string){const [h,m]=time.split(':').map(Number);return (h%12||12)+':'+String(m).padStart(2,'0')+(h<12?' AM':' PM');}
 const LIGHT_INK='#fffef9',DARK_INK='#173322',PAGE='#fffefa';
 // Text drawn on a team-coloured fill: whichever of the club's light or dark ink reads better.
 export function teamInk(color:string){return contrast(color,LIGHT_INK)>=contrast(color,DARK_INK)?LIGHT_INK:DARK_INK;}
