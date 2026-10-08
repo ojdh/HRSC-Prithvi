@@ -252,6 +252,8 @@ try{
   const played=(id,roster)=>({id,date:'2026-09-06',start:'07:00',end:'08:30',roster,opening:['red','black'],firstExit:'red',poll:'ready',rounds:[{id:'r',a:'red',b:'black',scoreA:0,scoreB:0,goals:[],lineup:[],exit:'red',winner:null}]});
   const [regular]=model.playerStats([{id:'p',name:'P',team:'red'}],[played('d1',[{id:'p',team:'red'}]),played('d2',[]),{...played('d3',[{id:'p',team:'red'}]),rounds:[]}]);
   ok(regular.attended===1&&regular.attendance===50,'attendance counts played matchdays only');
+  const squad=[{id:'r1',team:'red'},{id:'w1',team:'white'}];
+  ok(JSON.stringify(model.teamsWithout(squad.map(p=>p.id),squad))==='["black"]'&&JSON.stringify(model.teamsWithout(['r1'],squad))==='["black","white"]'&&model.teamsWithout(['r1','w1','b1'],[...squad,{id:'b1',team:'black'}]).length===0,'matchday setup names the teams with nobody attending');
   // Live gameday drafts: score derives from the goals list; the 10-minute clock pauses and resumes.
   const draft={...model.freshDraft(['p1','p2']),goals:[{team:'red',scorer:'p1',assist:null,ownGoal:false},{team:'black',scorer:'p1',assist:null,ownGoal:true},{team:'red',scorer:null,assist:null,ownGoal:false}]};
   const payload=model.roundPayload(draft,'red','black');

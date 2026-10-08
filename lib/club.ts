@@ -16,6 +16,8 @@ export type Day = {id:string;date:string;start:string;end:string;roster:{id:stri
 export type Club = {adminId:string;admins:string[];teams:Record<Team,TeamInfo>;players:Player[];days:Day[]};
 export type PublicClub = {invitation?:{name:string;team:Team};players:Player[];days:Day[];revision:number;initialized:boolean;isAdmin:boolean;isOwner:boolean;owner:string|null;admins:string[];teams:Record<Team,TeamInfo>;me:string|null;polls:Record<string,{count:number;voted:boolean;tally:{candidate:string;votes:number}[]}>};
 export const emptyClub:PublicClub={players:[],days:[],revision:0,initialized:false,isAdmin:false,isOwner:false,owner:null,admins:[],teams:DEFAULT_TEAMS,me:null,polls:{}};
+// Teams with no attending player among `ids`: a matchday needs all three teams present.
+export function teamsWithout(ids:string[],players:{id:string;team:Team}[]){return TEAMS.filter(t=>!players.some(p=>p.team===t&&ids.includes(p.id)));}
 export type ReadyDay = Day&{opening:[Team,Team];firstExit:Team};
 export const isReady=(day:Day):day is ReadyDay=>!!day.opening&&!!day.firstExit;
 export function nextMatch(day:ReadyDay):{a:Team;b:Team;waiting:Team;incumbent:Team} {
