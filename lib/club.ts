@@ -53,6 +53,13 @@ export function playerStats(players:Player[],days:Day[]){
   }).sort((a,b)=>b.goals-a.goals||b.assists-a.assists||b.wins-a.wins||a.name.localeCompare(b.name));
 }
 export function dateLabel(date:string,short=false){return new Intl.DateTimeFormat('en-CA',{month:short?'short':'long',day:'numeric',...(short?{}:{year:'numeric'}),timeZone:'UTC'}).format(new Date(date+'T12:00:00Z'));}
+// A game being played pitch-side, kept on the organiser's device until it is saved as a round.
+export type GameDraft = {lineup:string[];goals:Goal[];elapsed:number;startedAt:number|null};
+export const GAME_MS=10*60*1000;
+export const freshDraft=(lineup:string[]):GameDraft=>({lineup,goals:[],elapsed:0,startedAt:null});
+export const draftKey=(dayId:string,game:number)=>`hrsc-game:${dayId}:${game}`;
+export function gameClock(draft:GameDraft,now:number){return Math.max(0,GAME_MS-draft.elapsed-(draft.startedAt===null?0:now-draft.startedAt));}
+export function roundPayload(draft:GameDraft,a:Team,b:Team){return {scoreA:draft.goals.filter(g=>g.team===a).length,scoreB:draft.goals.filter(g=>g.team===b).length,goals:draft.goals,lineup:draft.lineup};}
 export const SEASON_START='2026-09-01';
 export const MAX_SERIES_DAYS=52;
 export function validDate(date:string){const d=new Date(date+'T12:00:00Z');return /^\d{4}-\d{2}-\d{2}$/.test(date)&&!isNaN(d.valueOf())&&d.toISOString().slice(0,10)===date&&date>=SEASON_START;}

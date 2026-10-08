@@ -252,6 +252,12 @@ try{
   const played=(id,roster)=>({id,date:'2026-09-06',start:'07:00',end:'08:30',roster,opening:['red','black'],firstExit:'red',poll:'ready',rounds:[{id:'r',a:'red',b:'black',scoreA:0,scoreB:0,goals:[],lineup:[],exit:'red',winner:null}]});
   const [regular]=model.playerStats([{id:'p',name:'P',team:'red'}],[played('d1',[{id:'p',team:'red'}]),played('d2',[]),{...played('d3',[{id:'p',team:'red'}]),rounds:[]}]);
   ok(regular.attended===1&&regular.attendance===50,'attendance counts played matchdays only');
+  // Live gameday drafts: score derives from the goals list; the 10-minute clock pauses and resumes.
+  const draft={...model.freshDraft(['p1','p2']),goals:[{team:'red',scorer:'p1',assist:null,ownGoal:false},{team:'black',scorer:'p1',assist:null,ownGoal:true},{team:'red',scorer:null,assist:null,ownGoal:false}]};
+  const payload=model.roundPayload(draft,'red','black');
+  ok(payload.scoreA===2&&payload.scoreB===1&&payload.goals.length===3&&JSON.stringify(payload.lineup)==='["p1","p2"]','round payload derives the score from goals');
+  ok(model.gameClock({...draft,elapsed:60000,startedAt:1000},121000)===model.GAME_MS-180000&&model.gameClock({...draft,elapsed:60000,startedAt:null},999999)===model.GAME_MS-60000&&model.gameClock({...draft,elapsed:0,startedAt:0},model.GAME_MS*2)===0,'game clock counts down, pauses, and stops at zero');
+  ok(model.draftKey('d1',3)!==model.draftKey('d1',4)&&model.draftKey('d1',3)!==model.draftKey('d2',3),'each game of each day has its own draft');
   ok(model.teamInk('#171918')==='#fffef9'&&model.teamInk('#eceddf')==='#173322'&&model.teamInk('#ff666b')==='#173322','crest text picks the more legible ink');
   const t=model.teamStats(state.days),p=model.playerStats(state.players,state.days);
   ok(t.find(x=>x.team==='red').wins===1&&t.find(x=>x.team==='black').wins===1,'team wins derived correctly');
