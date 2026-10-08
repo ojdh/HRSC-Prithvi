@@ -4,9 +4,13 @@ const JPEG_QUALITY = 0.85;
 // Portraits never need more than this, so very large camera photos start smaller.
 const MAX_EDGE_PX = 2560;
 const MIN_EDGE_PX = 320;
+// Cropped portraits are square and shown at avatar sizes, so this is ample.
+const CROP_EDGE_PX = 1024;
 const MAX_ENCODES = 6;
 // Aim slightly under the limit so the next encode is unlikely to overshoot.
 const SIZE_MARGIN = 0.95;
+
+export type CropArea = { x: number; y: number; width: number; height: number };
 
 export class PhotoTooLargeError extends Error {
   constructor() {
@@ -33,7 +37,19 @@ export async function compressPhoto(file: File): Promise<File> {
       initialScale: Math.min(1, MAX_EDGE_PX / longEdge),
       minScale: Math.min(1, MIN_EDGE_PX / longEdge),
     });
-    return new File([blob], file.name.replace(/\.[^.]*$/, '') + '.jpg', { type: 'image/jpeg' });
+    return jpegFile(blob, file.name);
+  } finally {
+    bitmap.close();
+  }
+}
+
+// The square region chosen in the crop dialog (in source pixels), scaled down to at most CROP_EDGE_PX a side.
+export async function cropPhoto(file: File, area: CropArea): Promise<File> {
+  const bitmap = await decode(file);
+  try {
+    const edge = Math.max(1, Math.round(Math.min(area.width, CROP_EDGE_PX)));
+    const blob = await renderJpeg(edge, edge, (context) => context.drawImage(bitmap, area.x, area.y, area.width, area.height, 0, 0, edge, edge));
+    return jpegFile(blob, file.name);
   } finally {
     bitmap.close();
   }
@@ -64,17 +80,26 @@ async function decode(file: File): Promise<ImageBitmap> {
   }
 }
 
-async function encodeJpeg(bitmap: ImageBitmap, scale: number): Promise<Blob> {
+function encodeJpeg(bitmap: ImageBitmap, scale: number): Promise<Blob> {
+  const width = Math.max(1, Math.round(bitmap.width * scale)), height = Math.max(1, Math.round(bitmap.height * scale));
+  return renderJpeg(width, height, (context) => context.drawImage(bitmap, 0, 0, width, height));
+}
+
+async function renderJpeg(width: number, height: number, draw: (context: CanvasRenderingContext2D) => void): Promise<Blob> {
   const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.width = width;
+  canvas.height = height;
   const context = canvas.getContext('2d');
-  if (!context) throw new Error('Canvas 2D context is unavailable for photo compression.');
+  if (!context) throw new Error('Canvas 2D context is unavailable for photo encoding.');
   // JPEG has no transparency; flatten PNG/WebP alpha onto white instead of black.
   context.fillStyle = '#fff';
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  context.fillRect(0, 0, width, height);
+  draw(context);
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY));
-  if (!blob) throw new Error(`Photo compression produced no image at ${canvas.width}x${canvas.height}.`);
+  if (!blob) throw new Error(`Photo encoding produced no image at ${width}x${height}.`);
   return blob;
+}
+
+function jpegFile(blob: Blob, name: string) {
+  return new File([blob], name.replace(/\.[^.]*$/, '') + '.jpg', { type: 'image/jpeg' });
 }
