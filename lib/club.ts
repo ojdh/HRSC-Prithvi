@@ -71,6 +71,10 @@ export function weeklyDates(from:string,to:string){const dates:string[]=[];for(c
 export function clubToday(){return new Date().toLocaleDateString('en-CA',{timeZone:'America/Edmonton'});}
 // Today's match day, else the next upcoming one, else the most recent.
 export function currentDay(days:Day[],today:string){const sorted=[...days].sort((a,b)=>a.date.localeCompare(b.date));return sorted.find(d=>d.date>=today)??sorted.at(-1);}
+// Played matchdays (at least one round) before today, newest first.
+export function pastMatchdays(days:Day[],today:string){return days.filter(d=>d.date<today&&d.rounds.length).sort((a,b)=>b.date.localeCompare(a.date));}
+// Player of the day: everyone tied on the most votes. A closed poll's tally arrives sorted by votes, highest first.
+export function awardWinners(tally:{candidate:string;votes:number}[]){const max=tally[0]?.votes||0;return tally.filter(x=>x.votes===max);}
 export function timeLabel(day:Day){return clockLabel(day.start)+'–'+clockLabel(day.end);}
 export const VIDEO_HOSTS=['youtube.com','www.youtube.com','youtu.be','vimeo.com','www.vimeo.com','drive.google.com'];
 export function isVideoUrl(url:string){try{const u=new URL(url);return u.protocol==='https:'&&VIDEO_HOSTS.includes(u.hostname);}catch{return false;}}
