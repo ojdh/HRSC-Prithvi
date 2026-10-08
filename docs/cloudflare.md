@@ -135,6 +135,8 @@ A seat is taken the first time a person signs in, and it stays taken. With "Ever
 **How** (`wrangler.jsonc`):
 
 - **Worker name:** `hrsc-prithvi`, built by `pnpm build` into `dist/`.
+- **Entry:** `worker/index.ts`. It hands every request to vinext's fetch handler and adds a `scheduled` handler for the daily storage clean-up (section 7).
+- **Daily Cron Trigger:** `triggers: { crons: ["17 9 * * *"] }` runs the clean-up once a day at 09:17 UTC. Cron Triggers are part of Workers Free, so this adds no product or cost.
 - **Address:** `routes: [{ pattern: "prithvifc.ca", custom_domain: true }]`. The deploy attaches the domain and creates its DNS record, so there's no clicking around in the dashboard.
 - **No second address:** `workers_dev: false` turns off the extra `*.workers.dev` address, so the site lives at exactly one URL.
 - **Settings and secrets:** the database ID, Access team URL, AUD tag and R2 limits are plain `vars`, not secrets. The one secret, `CLUB_SETUP_KEY`, is set separately with `wrangler secret put` and never stored in the repo.
@@ -163,7 +165,8 @@ A seat is taken the first time a person signs in, and it stays taken. With "Ever
 
 - **`putObject`** (photo or clip upload): adds one Class A operation to this month's count in D1 and reserves the file's bytes in a ledger, then uploads. If either would go past its limit, the upload is refused.
 - **`getObject`** (showing a photo, or one video chunk of up to 1 MB): adds one Class B operation first.
-- **`deleteObject`**: deleting is free in R2. The ledger row is removed only after R2 confirms the delete, so a failed delete keeps being counted. Over-counting is the safe side.
+- **`deleteObject`**: deleting is free in R2. The ledger row is removed only after R2 confirms the delete, so a failed delete keeps being counted. Over-counting is the safe side, and the daily clean-up retries the delete.
+- **`cleanupStorage`** (the daily Cron Trigger): deletes every object in the ledger that the club no longer references, such as one whose delete failed or one left behind when an upload stored a file but the save after it failed. References are player photos, player highlights, team photos and matchday clips. Objects stored in the last hour are left alone, since their upload may still be saving. It works from the ledger (`r2_objects`, whose `created_at` column comes from migration `0007`), so it makes no R2 list call, and deletes are free. It logs counts only.
 - **Checks come first:** the file is validated and the user's sign-in and permissions are checked before anything is charged. A bad upload or a stranger costs nothing.
 - **Missing limits:** every upload and view is refused (fails closed).
 
@@ -186,13 +189,13 @@ Each check runs before R2 is reached. Views follow the same pattern with a singl
 | `R2_CLASS_B_MONTHLY_LIMIT` | 5,000,000 | 10,000,000 | Photos and videos pause until the next UTC month |
 | Per file (in the routes) | Photo 2 MB, clip 20 MB | n/a | That file is refused |
 
-The gap below the free tier covers anything done outside the app, such as files uploaded by hand from the dashboard, plus any orphaned objects.
+The gap below the free tier covers anything done outside the app, such as files uploaded by hand from the dashboard, plus any orphaned objects waiting for the next clean-up.
 
 **How the rule is kept:**
 
 - `tests/r2-boundary.mjs` fails CI if any file other than `lib/r2-budget.ts` mentions the bucket.
 - `AGENTS.md` states the free-tier rules for anyone changing the code, human or AI. `CLAUDE.md` just imports it.
-- The integration test runs a deliberately tight budget and checks that each limit is enforced, that refused uploads store nothing, that deletes free up space, and that missing limits fail closed.
+- The integration test runs a deliberately tight budget and checks that each limit is enforced, that refused uploads store nothing, that deletes free up space, and that missing limits fail closed. It also runs the daily clean-up and checks that it removes orphans, keeps referenced and recent files, and retries a failed delete.
 
 **Created as:** bucket `hrsc-prithvi-media` in Western North America, after R2 was turned on in the dashboard. It started with 0 objects, so the ledger matches reality from day one.
 
