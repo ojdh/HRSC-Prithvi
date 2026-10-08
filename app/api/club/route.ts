@@ -5,6 +5,7 @@ import { TEAMS,DEFAULT_TEAMS,MAX_SERIES_DAYS,DELETION_APPROVALS,LOG_LIMIT,nextMa
 import { db,readClub,saveClub,check,digest,token,role,ClubError } from '@/lib/server-club';
 import {pendingInvite,findInvitation,inviteCookie} from '@/lib/server-invitations';
 import {deleteObject} from '@/lib/r2-budget';
+import {saveClubWithAccess,type AccessChange,type AccessResult} from '@/lib/access-sync';
 export const dynamic='force-dynamic';
 const team=z.enum(TEAMS),id=z.string().min(1).max(100);
 const date=z.string().refine(validDate,'Choose a real date on or after September 1, 2026.'),time=z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/,'Choose a valid time.');
@@ -17,6 +18,7 @@ const birthPair=[(v:{birthYear:number|null;birthMonth:number|null})=>(v.birthYea
 // The latest allowed birth year follows the club calendar, so it is checked per request rather than fixed when the Worker starts.
 const birthYear=z.number().int().min(1940,'Choose a birth year from 1940 onwards.').refine(y=>y<=Number(clubToday().slice(0,4))-5,'Players must be at least five years old.');
 const details=z.object({name:z.string().trim().min(1).max(60),birthYear:birthYear.nullable(),birthMonth:z.number().int().min(1,'Choose a birth month.').max(12,'Choose a birth month.').nullable(),height:z.number().int().min(70).max(250).nullable(),district:z.string().trim().max(60).nullable(),position:z.enum(['Goalkeeper','Defender','Midfielder','Forward','All-rounder'])});
+const email=z.string().trim().max(254).transform(s=>s.toLowerCase()).refine(s=>!s||z.string().email().safeParse(s).success,'Enter a valid email address.').nullable().transform(s=>s||null);
 function response(value:unknown,status=200){return Response.json(value,{status,headers:{'Cache-Control':'private, no-store'}});}
 function fail(e:unknown){if(e instanceof ClubError)return response({error:e.message},e.status);if(e instanceof z.ZodError)return response({error:e.issues[0].message},400);console.error('Club request failed',e instanceof Error?e.message:'unknown');return response({error:'We could not save or load that. Please retry; your form is still here.'},503);}
 export async function GET(req:Request){try{
@@ -34,7 +36,7 @@ export async function GET(req:Request){try{
     const tally=day.poll==='closed'?tallies.filter(t=>t.day===day.id).map(({candidate,votes})=>({candidate,votes})):[];
     polls[day.id]={count:counts.find(x=>x.day===day.id)?.n??0,voted:mine.some(x=>x.day===day.id),tally};
   }
-  return response({initialized:true,revision,isAdmin:admin,isOwner:owner,owner:club.players.find(p=>p.userId===club.adminId)?.id??null,admins:club.admins,teams:club.teams,me:me?.id??null,players:club.players.map(({userId,inviteHash,legacyInviteHash,inviteToken,...p})=>({...p,linked:!!userId})),days:admin?club.days:club.days.map(({deletion,...d})=>d),polls,...(admin?{log:club.log??[]}:{})});
+  return response({initialized:true,revision,isAdmin:admin,isOwner:owner,owner:club.players.find(p=>p.userId===club.adminId)?.id??null,admins:club.admins,teams:club.teams,me:me?.id??null,players:club.players.map(({userId,inviteHash,legacyInviteHash,inviteToken,email,accessEmail,...p})=>({...p,linked:!!userId,...(admin?{email,accessEmail}:{})})),days:admin?club.days:club.days.map(({deletion,...d})=>d),polls,...(admin?{log:club.log??[]}:{})});
 }catch(e){return fail(e);}}
 export async function POST(req:Request){try{
   const origin=req.headers.get('origin');check(!origin||origin===new URL(req.url).origin,'This request must come from the club website.',403);
@@ -66,7 +68,7 @@ export async function POST(req:Request){try{
     return response({ok:true});
   }
   check(body.revision===revision,'The club was updated. Refresh before saving this change.',409);
-  let extra:Record<string,unknown>={},deleted:Day|undefined;
+  let extra:Record<string,unknown>={},deleted:Day|undefined;let access:{change:AccessChange;apply:(r:AccessResult)=>void}|undefined;
   if(action==='claim'){
     check(!me,'This account already has a player profile. Sign out and sign in with the invited player’s email.');
     const p=await findInvitation(club,z.string().min(20).max(150).parse(body.token||pendingInvite(req)));check(p&&!p.userId,'This invitation has already been used or is unavailable. Ask your organiser for the current link.');p.userId=user.userId;delete p.inviteHash;delete p.legacyInviteHash;delete p.inviteToken;
@@ -84,16 +86,25 @@ export async function POST(req:Request){try{
   }else{
     check(admin,'Only club admins can change match records and teams.',403);
     if(action==='addPlayer'){
-      const input=details.extend({team}).refine(...birthPair).parse(body);check(club.players.length<150,'The club supports up to 150 players.');
-      club.players.push({...input,id:crypto.randomUUID(),active:true,photo:null});
+      const {email:newEmail,...input}=details.extend({team,email:email.optional()}).refine(...birthPair).parse(body);check(club.players.length<150,'The club supports up to 150 players.');
+      if(newEmail)check(!emailTaken(club,newEmail),'Another player already uses that email.');
+      club.players.push({...input,...(newEmail?{email:newEmail}:{}),id:crypto.randomUUID(),active:true,photo:null});
     }else if(action==='editPlayer'){
-      const input=details.extend({team,id}).refine(...birthPair).parse(body);const p=club.players.find(p=>p.id===input.id&&p.active!==false);check(p,'Active player not found.');Object.assign(p,input);
+      const {email:newEmail,...input}=details.extend({team,id,email:email.optional()}).refine(...birthPair).parse(body);const p=club.players.find(p=>p.id===input.id&&p.active!==false);check(p,'Active player not found.');Object.assign(p,input);
+      if(newEmail!==undefined&&newEmail!==(p.email??null)){
+        check(!p.userId,'A player’s email can only be changed before they accept their invitation.');
+        if(newEmail)check(!emailTaken(club,newEmail,p.id),'Another player already uses that email.');
+        p.email=newEmail;
+        // An invited player's Access entry follows their email.
+        if(p.accessEmail)access={change:{add:newEmail,remove:p.accessEmail},apply:r=>{p.accessEmail=r.added?newEmail:null;}};
+      }
     }else if(action==='archivePlayer'||action==='restorePlayer'){
       const playerId=id.parse(body.playerId);const p=club.players.find(p=>p.id===playerId);check(p,'Player not found.');check(p.userId!==club.adminId,'The organiser cannot remove their own profile.');
       if(action==='archivePlayer'){
         check(p.active!==false,'This player has already been removed.');check(owner||!club.admins.includes(p.id),'Only the club owner can remove an admin.',403);
         check(!club.days.some(d=>d.poll==='open'&&d.roster.some(r=>r.id===p.id)),'Close voting for this player’s match day before removing them.');
         p.active=false;club.admins=club.admins.filter(a=>a!==p.id);
+        if(p.accessEmail)access={change:{remove:p.accessEmail},apply:()=>{p.accessEmail=null;}};
       }else{check(p.active===false,'This player is already on the active roster.');p.active=true;}
     }else if(action==='editTeam'){
       const input=z.object({team,name:z.string().trim().min(1).max(30),letter:z.string().trim().min(1).max(2).transform(s=>s.toUpperCase()),color:z.string().regex(/^#[0-9a-fA-F]{6}$/,'Choose a colour like #1f7a4d.').transform(s=>s.toLowerCase()),motto:z.string().trim().max(60)}).parse(body);
@@ -102,6 +113,9 @@ export async function POST(req:Request){try{
     }else if(action==='invite'){
       const p=club.players.find(p=>p.id===body.playerId&&p.active!==false);check(p,'Active player not found.');check(!p.userId,'This player already has an account.');
       if(!p.inviteToken){if(p.inviteHash)p.legacyInviteHash=p.inviteHash;p.inviteToken=token();p.inviteHash=await digest(p.inviteToken);}extra={invite:p.inviteToken};
+      // Only invited emails are registered in Access. An email already there that the app did not add stays unmanaged.
+      if(p.email){const invited=p.email,stale=p.accessEmail&&p.accessEmail!==invited?p.accessEmail:null;
+        access={change:{add:invited,remove:stale},apply:r=>{const ours=r.added||p.accessEmail===invited;p.accessEmail=ours?invited:null;extra.access=r.added?'added':'already';}};}
     }else if(action==='addDays'){
       const input=slot.extend({from:date,to:date.optional()}).refine(...endsAfterStart).refine(v=>!v.to||v.to>=v.from,'The series must end on or after its first date.').parse(body);
       const dates=input.to?weeklyDates(input.from,input.to):[input.from];check(dates.length<=MAX_SERIES_DAYS,`A series can hold up to ${MAX_SERIES_DAYS} match days.`);
@@ -159,7 +173,7 @@ export async function POST(req:Request){try{
       const input=z.object({dayId:id,roundId:id,videoUrl}).parse(body);const round=club.days.find(d=>d.id===input.dayId)?.rounds.find(r=>r.id===input.roundId);check(round,'Round not found.');round.videoUrl=input.videoUrl||null;
     }else throw new ClubError('Unknown action.');
   }
-  await saveClub(club,revision);
+  if(access)await saveClubWithAccess(club,revision,access.change,access.apply);else await saveClub(club,revision);
   if(deleted){
     await db().batch([db().prepare('DELETE FROM ballots WHERE day=?').bind(deleted.id),db().prepare('DELETE FROM vote_receipts WHERE day=?').bind(deleted.id)]);
     if(deleted.videoKey)await deleteObject(deleted.videoKey);
@@ -191,3 +205,4 @@ function settleDeletion(club:Club,day:Day,by:string){
   if(!(ownerId&&current.includes(ownerId))&&current.length<DELETION_APPROVALS)return undefined;
   club.days=club.days.filter(d=>d.id!==day.id);record(club,by,'deleteDay',day);return day;
 }
+function emailTaken(club:Club,email:string,exceptId?:string){return club.players.some(p=>p.id!==exceptId&&(p.email===email||p.accessEmail===email));}

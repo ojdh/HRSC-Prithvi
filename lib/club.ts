@@ -7,7 +7,8 @@ export const DEFAULT_TEAMS: Record<Team,TeamInfo> = {
   white:{name:'Team White',color:'#eceddf',letter:'W',motto:'Make your mark.'},
 };
 export type Highlight = {id:string;key:string;kind:'Goal'|'Assist'|'Save'|'Skill'|'Foul'|'Other';note:string};
-export type Player = {id:string;name:string;team:Team;birthYear?:number|null;birthMonth?:number|null;height:number|null;position:string;number?:number|null;district?:string|null;active?:boolean;photo:string|null;highlights?:Highlight[];userId?:string;inviteHash?:string;legacyInviteHash?:string;inviteToken?:string;linked?:boolean};
+// email is admin-set on an unclaimed player; accessEmail is the email the app added to the club-members Access group.
+export type Player = {id:string;name:string;team:Team;birthYear?:number|null;birthMonth?:number|null;height:number|null;position:string;number?:number|null;district?:string|null;active?:boolean;photo:string|null;highlights?:Highlight[];userId?:string;inviteHash?:string;legacyInviteHash?:string;inviteToken?:string;linked?:boolean;email?:string|null;accessEmail?:string|null};
 export type Goal = {team:Team;scorer:string|null;assist:string|null;ownGoal:boolean};
 export type Round = {id:string;a:Team;b:Team;scoreA:number;scoreB:number;goals:Goal[];lineup:string[];exit:Team;winner:Team|null;videoUrl?:string|null};
 // A scheduled day has an empty roster and no opening teams until it is set up on the day. start/end are club-local HH:MM.

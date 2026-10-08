@@ -421,6 +421,115 @@ try{
     ok((await send(unbudgeted,'/api/photo','owner',{photo:photoFile()})).status===503,'missing R2 budget configuration fails closed');
     ok(await storedObjects(unbudgeted)===0,'unbudgeted upload stores nothing');
   }finally{await unbudgeted.dispose()}
+  // Access sync: inviting a player with an email adds it to the club-members Access group.
+  await success('addPlayer',{...fields,name:'Emailed signing',team:'red',email:'signing@example.com'});
+  const unsyncedSigning=(await get()).data.players.find(p=>p.name==='Emailed signing');
+  const unconfiguredInvite=await post('invite',{playerId:unsyncedSigning.id});
+  ok(unconfiguredInvite.status===503&&/Access sync isn't configured/.test(unconfiguredInvite.data.error),'inviting an emailed player without Access config fails loudly: '+JSON.stringify(unconfiguredInvite));
+  const manualRules=()=>[{email:{email:'owner@manual.test'}},{email:{email:'admin@manual.test'}},{email_domain:{domain:'partner.test'}}];
+  const cfApi={group:null,calls:[],fail:false,onPut:null};
+  const groupPath='/client/v4/accounts/test-account/access/groups/test-group';
+  async function cloudflareApi(req){
+    const url=new URL(req.url);if(url.origin!=='https://api.cloudflare.com')return accessService(req);
+    cfApi.calls.push({method:req.method,path:url.pathname,auth:req.headers.get('authorization')});
+    const envelope=(result,status=200,errors=[])=>Response.json({success:!errors.length,errors,messages:[],result},{status});
+    if(url.pathname!==groupPath)return envelope(null,404,[{code:7003,message:'Could not route'}]);
+    if(cfApi.fail)return envelope(null,500,[{code:10000,message:'Internal error'}]);
+    if(req.method==='GET')return envelope(cfApi.group);
+    if(req.method==='PUT'){const body=await req.json();cfApi.lastPut=body;if(cfApi.onPut)await cfApi.onPut();cfApi.group={...cfApi.group,...body};return envelope(cfApi.group);}
+    return envelope(null,405,[{code:10405,message:'Method not allowed'}]);
+  }
+  const groupEmails=()=>(cfApi.group.include??[]).filter(r=>r.email).map(r=>r.email.email);
+  const synced=new Miniflare({...workerOptions,outboundService:cloudflareApi,bindings:{...accessBindings,...budget({storage:1e9,classA:1e6,classB:1e7}),CF_ACCOUNT_ID:'test-account',CF_ACCESS_GROUP_ID:'test-group',CF_API_TOKEN:'test-api-token'}});
+  try{
+    await setUp(synced);
+    const read=async(user='owner')=>(await (await synced.dispatchFetch(origin+'/api/club',{headers:await headers(user)})).json());
+    async function call(action,body={},user='owner'){const revision=(await read(user)).revision;const r=await synced.dispatchFetch(origin+'/api/club',{method:'POST',headers:await headers(user),body:JSON.stringify({action,revision,...body})});return {status:r.status,data:await r.json()}}
+    const resetGroup=(include=manualRules())=>{cfApi.group={id:'test-group',name:'Club members',include,exclude:[{email:{email:'banned@manual.test'}}],require:[],is_default:false,created_at:'2026-09-01T00:00:00Z'};cfApi.calls=[];cfApi.fail=false;cfApi.onPut=null;};
+    resetGroup();
+    ok((await call('addPlayer',{...fields,name:'Synced signing',team:'red',email:'  New.Player@Example.COM '})).status===200,'admin sets an email on a new placeholder player');
+    ok((await call('addPlayer',{...fields,name:'No email',team:'black'})).status===200,'email stays optional');
+    ok((await call('addPlayer',{...fields,name:'Bad email',team:'black',email:'not-an-email'})).status===400,'invalid email rejected');
+    ok((await call('addPlayer',{...fields,name:'Twin',team:'black',email:'new.player@example.com'})).status===400,'emails are unique across players');
+    let club=await read();const syncedPlayer=club.players.find(p=>p.name==='Synced signing'),noEmail=club.players.find(p=>p.name==='No email');
+    ok(syncedPlayer.email==='new.player@example.com'&&!syncedPlayer.accessEmail,'email trimmed and lower-cased, not yet in Access');
+    ok(cfApi.calls.length===0,'setting an email never calls Cloudflare');
+    // A linked non-admin member for the permission checks.
+    const memberToken=(await call('invite',{playerId:noEmail.id})).data.invite;
+    ok(cfApi.calls.length===0,'inviting a player without an email never calls Cloudflare');
+    ok((await call('claim',{token:memberToken},'member')).status===200,'member claims their invite');
+    ok((await call('invite',{playerId:syncedPlayer.id},'member')).status===403&&cfApi.calls.length===0,'non-admin invite refused before any Cloudflare call');
+    ok((await call('archivePlayer',{playerId:syncedPlayer.id},'member')).status===403&&cfApi.calls.length===0,'non-admin archive refused before any Cloudflare call');
+    ok((await call('profile',{...fields,name:'No email',email:'member@example.com'},'member')).status===403,'players cannot set their own email');
+    const memberView=JSON.stringify(await read('member'));
+    ok(!memberView.includes('"email"')&&!memberView.includes('accessEmail')&&!memberView.includes('new.player@example.com'),'non-admins never see player emails');
+    // Invite: the email joins the group; every other rule is kept.
+    const invited=await call('invite',{playerId:syncedPlayer.id});
+    ok(invited.status===200&&invited.data.access==='added'&&invited.data.invite,'invite adds the email to Access: '+JSON.stringify(invited));
+    ok(JSON.stringify(groupEmails())===JSON.stringify(['owner@manual.test','admin@manual.test','new.player@example.com'])&&cfApi.group.include.some(r=>r.email_domain)&&cfApi.group.exclude.length===1&&cfApi.group.name==='Club members','invite keeps manual emails and other rules');
+    ok(cfApi.calls.every(c=>c.path===groupPath&&c.auth==='Bearer test-api-token')&&cfApi.calls.map(c=>c.method).join()==='GET,PUT','invite reads then writes the configured group with the API token');
+    ok(!('id' in cfApi.lastPut)&&!('created_at' in cfApi.lastPut)&&cfApi.lastPut.is_default===false&&Array.isArray(cfApi.lastPut.require),'PUT sends only the group fields Cloudflare accepts');
+    ok((await read()).players.find(p=>p.id===syncedPlayer.id).accessEmail==='new.player@example.com','accessEmail recorded after the group update');
+    cfApi.calls=[];
+    const again=await call('invite',{playerId:syncedPlayer.id});
+    ok(again.status===200&&again.data.invite===invited.data.invite&&again.data.access==='already'&&groupEmails().length===3&&!cfApi.calls.some(c=>c.method==='PUT'),'re-invite is idempotent');
+    // Changing the email of an invited, unclaimed player swaps it in Access.
+    ok((await call('editPlayer',{...fields,id:syncedPlayer.id,name:'Synced signing',team:'red',email:'Other@Example.com'})).status===200,'admin changes an invited player\'s email');
+    ok(JSON.stringify(groupEmails())===JSON.stringify(['owner@manual.test','admin@manual.test','other@example.com']),'email change swaps old for new in Access');
+    ok((await read()).players.find(p=>p.id===syncedPlayer.id).accessEmail==='other@example.com','accessEmail follows the swap');
+    ok((await call('editPlayer',{...fields,id:noEmail.id,name:'No email',team:'black',email:'claimed@example.com'})).status===400,'email cannot be set on a claimed player');
+    // A failed Cloudflare call leaves the club unchanged.
+    cfApi.fail=true;const before=(await read()).revision;
+    const failed=await call('editPlayer',{...fields,id:syncedPlayer.id,name:'Synced signing',team:'red',email:'third@example.com'});
+    ok(failed.status===502&&/Cloudflare Access/.test(failed.data.error)&&(await read()).revision===before,'Cloudflare failure saves nothing: '+JSON.stringify(failed));
+    cfApi.fail=false;
+    // A save that loses the revision race undoes its group change.
+    cfApi.onPut=async()=>{cfApi.onPut=null;await (await synced.getD1Database('DB')).prepare('UPDATE club SET revision=revision+1 WHERE id=1').run();};
+    const raced=await call('editPlayer',{...fields,id:syncedPlayer.id,name:'Synced signing',team:'red',email:'third@example.com'});
+    ok(raced.status===409&&JSON.stringify(groupEmails())===JSON.stringify(['owner@manual.test','admin@manual.test','other@example.com']),'failed save rolls the Access change back: '+JSON.stringify(raced));
+    // Access changes run one at a time: an overlapping one is refused before it touches the group.
+    ok((await call('addPlayer',{...fields,name:'Overlap',team:'white',email:'overlap@example.com'})).status===200,'placeholder for the overlap check');
+    const overlapPlayer=(await read()).players.find(p=>p.name==='Overlap');
+    let overlapping;cfApi.calls=[];
+    cfApi.onPut=async()=>{cfApi.onPut=null;const callsBefore=cfApi.calls.length;overlapping=await call('archivePlayer',{playerId:syncedPlayer.id});overlapping.calls=cfApi.calls.length-callsBefore;};
+    const first=await call('invite',{playerId:overlapPlayer.id});
+    ok(first.status===200&&overlapping.status===409&&/sign-in access/i.test(overlapping.data.error)&&overlapping.calls===0,'overlapping Access change refused without calling Cloudflare: '+JSON.stringify(overlapping));
+    ok(groupEmails().includes('overlap@example.com')&&groupEmails().includes('other@example.com'),'the first change is kept');
+    ok((await call('archivePlayer',{playerId:overlapPlayer.id})).status===200&&!groupEmails().includes('overlap@example.com'),'the lock is released after each change');
+    await (await synced.getD1Database('DB')).prepare('INSERT INTO access_sync_lock (id,token,expires) VALUES (1,?,?)').bind('abandoned',Date.now()-1).run();
+    ok((await call('restorePlayer',{playerId:overlapPlayer.id})).status===200,'overlap player restored');
+    ok((await call('invite',{playerId:overlapPlayer.id})).status===200&&groupEmails().includes('overlap@example.com'),'an abandoned lock expires');
+    ok((await call('archivePlayer',{playerId:overlapPlayer.id})).status===200,'overlap player archived');
+    // Archiving removes only the email the app added.
+    cfApi.calls=[];
+    ok((await call('archivePlayer',{playerId:syncedPlayer.id})).status===200,'admin archives an invited player');
+    ok(JSON.stringify(groupEmails())===JSON.stringify(['owner@manual.test','admin@manual.test'])&&cfApi.group.include.some(r=>r.email_domain),'archive removes the player\'s email and keeps the rest');
+    ok(!(await read()).players.find(p=>p.id===syncedPlayer.id).accessEmail,'archive clears accessEmail');
+    // An email someone added by hand is never claimed or removed by the app.
+    ok((await call('addPlayer',{...fields,name:'Manual admin',team:'white',email:'admin@manual.test'})).status===200,'placeholder may use an email already in Access');
+    const manualPlayer=(await read()).players.find(p=>p.name==='Manual admin');
+    const manualInvite=await call('invite',{playerId:manualPlayer.id});
+    ok(manualInvite.status===200&&manualInvite.data.access==='already'&&!(await read()).players.find(p=>p.id===manualPlayer.id).accessEmail,'manual Access email is not recorded as app-managed');
+    cfApi.calls=[];
+    ok((await call('archivePlayer',{playerId:manualPlayer.id})).status===200&&groupEmails().includes('admin@manual.test')&&cfApi.calls.length===0,'archiving never removes a manually added email');
+    // The Zero Trust Free plan has 50 seats.
+    resetGroup(Array.from({length:50},(_,i)=>({email:{email:`member${i}@manual.test`}})));
+    ok((await call('addPlayer',{...fields,name:'Seat 51',team:'white',email:'seat51@example.com'})).status===200,'placeholder for the 51st seat');
+    const seat51=(await read()).players.find(p=>p.name==='Seat 51');
+    const full=await call('invite',{playerId:seat51.id});
+    ok(full.status===409&&/50/.test(full.data.error)&&groupEmails().length===50&&!cfApi.calls.some(c=>c.method==='PUT'),'51st Access email refused: '+JSON.stringify(full));
+    ok(!(await read()).players.find(p=>p.id===seat51.id).accessEmail,'refused invite records nothing');
+  }finally{await synced.dispose()}
+  // A group id still at its wrangler.jsonc placeholder counts as unconfigured: deploys go ahead, invites with an email fail loudly.
+  const placeholderGroup=new Miniflare({...workerOptions,outboundService:cloudflareApi,bindings:{...accessBindings,CF_ACCOUNT_ID:'test-account',CF_ACCESS_GROUP_ID:'REPLACE_WITH_CLUB_MEMBERS_ACCESS_GROUP_ID',CF_API_TOKEN:'test-api-token'}});
+  try{
+    await setUp(placeholderGroup);
+    const call=async(action,body)=>{const revision=(await (await placeholderGroup.dispatchFetch(origin+'/api/club',{headers:await headers('owner')})).json()).revision;const r=await placeholderGroup.dispatchFetch(origin+'/api/club',{method:'POST',headers:await headers('owner'),body:JSON.stringify({action,revision,...body})});return {status:r.status,data:await r.json()}};
+    ok((await call('addPlayer',{...fields,name:'Pending group',team:'red',email:'pending@example.com'})).status===200,'email accepted before Access sync is configured');
+    const pending=(await (await placeholderGroup.dispatchFetch(origin+'/api/club',{headers:await headers('owner')})).json()).players.find(p=>p.name==='Pending group');
+    cfApi.calls=[];const refused=await call('invite',{playerId:pending.id});
+    ok(refused.status===503&&/Access sync isn't configured/.test(refused.data.error)&&cfApi.calls.length===0,'placeholder group id fails loudly without calling Cloudflare: '+JSON.stringify(refused));
+  }finally{await placeholderGroup.dispose()}
   // Daily storage clean-up: the cron removes R2 objects nothing references, keeps
   // referenced and freshly uploaded ones, and retries a delete that failed.
   const storageDir=await mkdtemp(join(tmpdir(),'hrsc-cleanup-'));

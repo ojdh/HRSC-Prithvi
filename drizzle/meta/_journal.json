@@ -64,6 +64,13 @@
       "when": 1791446442029,
       "tag": "0008_birth_month",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1791447549629,
+      "tag": "0009_access_sync_lock",
+      "breakpoints": true
     }
   ]
 }

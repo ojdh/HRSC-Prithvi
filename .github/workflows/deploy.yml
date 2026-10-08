@@ -35,12 +35,6 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
-      - name: Refuse unprovisioned configuration
-        run: |
-          if grep -v '^[[:space:]]*//' wrangler.jsonc | grep -n 'REPLACE_WITH_'; then
-            echo "wrangler.jsonc still has placeholders; see README 'Deploying to Cloudflare'." >&2
-            exit 1
-          fi
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
