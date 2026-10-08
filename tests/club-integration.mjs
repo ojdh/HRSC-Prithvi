@@ -393,6 +393,19 @@ try{
     cfApi.onPut=async()=>{cfApi.onPut=null;await (await synced.getD1Database('DB')).prepare('UPDATE club SET revision=revision+1 WHERE id=1').run();};
     const raced=await call('editPlayer',{...fields,id:syncedPlayer.id,name:'Synced signing',team:'red',email:'third@example.com'});
     ok(raced.status===409&&JSON.stringify(groupEmails())===JSON.stringify(['owner@manual.test','admin@manual.test','other@example.com']),'failed save rolls the Access change back: '+JSON.stringify(raced));
+    // Access changes run one at a time: an overlapping one is refused before it touches the group.
+    ok((await call('addPlayer',{...fields,name:'Overlap',team:'white',email:'overlap@example.com'})).status===200,'placeholder for the overlap check');
+    const overlapPlayer=(await read()).players.find(p=>p.name==='Overlap');
+    let overlapping;cfApi.calls=[];
+    cfApi.onPut=async()=>{cfApi.onPut=null;const callsBefore=cfApi.calls.length;overlapping=await call('archivePlayer',{playerId:syncedPlayer.id});overlapping.calls=cfApi.calls.length-callsBefore;};
+    const first=await call('invite',{playerId:overlapPlayer.id});
+    ok(first.status===200&&overlapping.status===409&&/sign-in access/i.test(overlapping.data.error)&&overlapping.calls===0,'overlapping Access change refused without calling Cloudflare: '+JSON.stringify(overlapping));
+    ok(groupEmails().includes('overlap@example.com')&&groupEmails().includes('other@example.com'),'the first change is kept');
+    ok((await call('archivePlayer',{playerId:overlapPlayer.id})).status===200&&!groupEmails().includes('overlap@example.com'),'the lock is released after each change');
+    await (await synced.getD1Database('DB')).prepare('INSERT INTO access_sync_lock (id,token,expires) VALUES (1,?,?)').bind('abandoned',Date.now()-1).run();
+    ok((await call('restorePlayer',{playerId:overlapPlayer.id})).status===200,'overlap player restored');
+    ok((await call('invite',{playerId:overlapPlayer.id})).status===200&&groupEmails().includes('overlap@example.com'),'an abandoned lock expires');
+    ok((await call('archivePlayer',{playerId:overlapPlayer.id})).status===200,'overlap player archived');
     // Archiving removes only the email the app added.
     cfApi.calls=[];
     ok((await call('archivePlayer',{playerId:syncedPlayer.id})).status===200,'admin archives an invited player');

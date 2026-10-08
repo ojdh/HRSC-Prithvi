@@ -7,4 +7,6 @@ export const ballots = sqliteTable('ballots', {id:text('id').primaryKey(),day:te
 export const maintenanceEvents = sqliteTable('maintenance_events',{id:text('id').primaryKey(),dayId:text('day_id').notNull(),date:text('date').notNull(),roundsRemoved:integer('rounds_removed').notNull(),votesRemoved:integer('votes_removed').notNull(),playersBefore:integer('players_before').notNull(),completed:integer('completed').notNull().default(0)});
 // Free-tier ledger for R2, written only by lib/r2-budget.ts: operations charged per UTC month, and the size of every stored object.
 export const r2Usage = sqliteTable('r2_usage',{month:text('month').primaryKey(),classA:integer('class_a').notNull().default(0),classB:integer('class_b').notNull().default(0)});
-export const r2Objects = sqliteTable('r2_objects',{key:text('key').primaryKey(),bytes:integer('bytes').notNull()});
+// One row while the app changes the Cloudflare Access group, so two changes never overwrite each other (lib/access-sync.ts).
+export const accessSyncLock = sqliteTable('access_sync_lock',{id:integer('id').primaryKey(),token:text('token').notNull(),expires:integer('expires').notNull()});
+export const r2Objects =sqliteTable('r2_objects',{key:text('key').primaryKey(),bytes:integer('bytes').notNull()});
