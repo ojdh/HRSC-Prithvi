@@ -12,6 +12,10 @@ Confirm attendance and opening teams. Attendance and that day's team assignments
 
 Stats derive from stored results and selected round lineups, with historical team snapshots. Draws grant no wins. Own goals count for the team's score but not individual goals/assists. Unknown scorers can be recorded explicitly. Undo the latest round to correct a result, then re-enter it. An organiser can export the public stats and match history as JSON.
 
+## Gameday
+
+Admins run a session from Gameday (Live on phones). It opens on today's matchday, or the next one, and starts with Who's here? for attendance and the opening teams. The live board then shows the current game and who is waiting, with a 10-minute clock and a Goal button for each team. Each goal records a scorer, optional assist or own goal, and the score follows the goal list. End game saves the game, and the board moves to the next game using the winner-stays rule. The session panel lists the games played and handles late arrivals, Undo last game and opening the vote. A game in progress is kept in the organiser's browser storage until it is saved, so a reload pitch-side does not lose it; nothing reaches the server until End game.
+
 ## Voting
 
 One irreversible vote per attending player; no own-team candidates. Personal invitations are random, single-use and tied to a preassigned roster record. Recopying an unclaimed invitation returns the same link. Tokens remain server-private; a protected cookie carries the invitation through sign-in. A D1 transactional batch enforces one receipt and one anonymous ballot, with revision checks protecting poll closure races. Participation and ballot choice are stored separately. Member-facing APIs never expose individual choices or identity keys. Aggregate results stay hidden until voting closes; tied leaders share the award. Small groups or infrastructure-level timing observations may still permit inference; this is not cryptographic anonymity.
