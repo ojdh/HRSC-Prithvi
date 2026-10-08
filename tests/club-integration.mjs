@@ -252,6 +252,8 @@ try{
   const played=(id,roster)=>({id,date:'2026-09-06',start:'07:00',end:'08:30',roster,opening:['red','black'],firstExit:'red',poll:'ready',rounds:[{id:'r',a:'red',b:'black',scoreA:0,scoreB:0,goals:[],lineup:[],exit:'red',winner:null}]});
   const [regular]=model.playerStats([{id:'p',name:'P',team:'red'}],[played('d1',[{id:'p',team:'red'}]),played('d2',[]),{...played('d3',[{id:'p',team:'red'}]),rounds:[]}]);
   ok(regular.attended===1&&regular.attendance===50,'attendance counts played matchdays only');
+  const squad=[{id:'r1',team:'red'},{id:'w1',team:'white'}];
+  ok(JSON.stringify(model.teamsWithout(squad.map(p=>p.id),squad))==='["black"]'&&JSON.stringify(model.teamsWithout(['r1'],squad))==='["black","white"]'&&model.teamsWithout(['r1','w1','b1'],[...squad,{id:'b1',team:'black'}]).length===0,'matchday setup names the teams with nobody attending');
   // League table: 3 points a win, 1 a draw; GF, GA and GD add up over every game played.
   const game=(a,b,scoreA,scoreB)=>({id:a+b+scoreA+scoreB,a,b,scoreA,scoreB,goals:[],lineup:[],exit:a,winner:scoreA===scoreB?null:scoreA>scoreB?a:b});
   const table=model.teamStats([{...played('t1',[]),rounds:[game('red','black',1,0),game('black','white',0,0),game('white','black',0,0),game('black','red',0,0),game('red','white',0,3)]}]);
