@@ -426,6 +426,16 @@ try{
     ok(full.status===409&&/50/.test(full.data.error)&&groupEmails().length===50&&!cfApi.calls.some(c=>c.method==='PUT'),'51st Access email refused: '+JSON.stringify(full));
     ok(!(await read()).players.find(p=>p.id===seat51.id).accessEmail,'refused invite records nothing');
   }finally{await synced.dispose()}
+  // A group id still at its wrangler.jsonc placeholder counts as unconfigured: deploys go ahead, invites with an email fail loudly.
+  const placeholderGroup=new Miniflare({...workerOptions,outboundService:cloudflareApi,bindings:{...accessBindings,CF_ACCOUNT_ID:'test-account',CF_ACCESS_GROUP_ID:'REPLACE_WITH_CLUB_MEMBERS_ACCESS_GROUP_ID',CF_API_TOKEN:'test-api-token'}});
+  try{
+    await setUp(placeholderGroup);
+    const call=async(action,body)=>{const revision=(await (await placeholderGroup.dispatchFetch(origin+'/api/club',{headers:await headers('owner')})).json()).revision;const r=await placeholderGroup.dispatchFetch(origin+'/api/club',{method:'POST',headers:await headers('owner'),body:JSON.stringify({action,revision,...body})});return {status:r.status,data:await r.json()}};
+    ok((await call('addPlayer',{...fields,name:'Pending group',team:'red',email:'pending@example.com'})).status===200,'email accepted before Access sync is configured');
+    const pending=(await (await placeholderGroup.dispatchFetch(origin+'/api/club',{headers:await headers('owner')})).json()).players.find(p=>p.name==='Pending group');
+    cfApi.calls=[];const refused=await call('invite',{playerId:pending.id});
+    ok(refused.status===503&&/Access sync isn't configured/.test(refused.data.error)&&cfApi.calls.length===0,'placeholder group id fails loudly without calling Cloudflare: '+JSON.stringify(refused));
+  }finally{await placeholderGroup.dispose()}
   // Data migrations upgrade a club saved before them.
   const oldClub=new Miniflare({...workerOptions,bindings:accessBindings});
   try{

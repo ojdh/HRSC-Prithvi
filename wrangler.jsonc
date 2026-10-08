@@ -1,6 +1,6 @@
 // Production Worker configuration for prithvifc.ca, provisioned as described in
 // README "Deploying to Cloudflare". None of these values are secrets;
-// CLUB_SETUP_KEY and CF_API_TOKEN are set with `wrangler secret put`.
+// CLUB_SETUP_KEY, CF_ACCOUNT_ID and CF_API_TOKEN are set with `wrangler secret put`.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "hrsc-prithvi",
@@ -28,9 +28,9 @@
     "R2_CLASS_A_MONTHLY_LIMIT": "500000",
     "R2_CLASS_B_MONTHLY_LIMIT": "5000000",
     // Access sync (lib/access-sync.ts): inviting a player with an email adds it to
-    // the club-members Access group. The API token is the CF_API_TOKEN secret;
-    // see docs/cloudflare.md "Access sync on invite".
-    "CF_ACCOUNT_ID": "REPLACE_WITH_CLOUDFLARE_ACCOUNT_ID",
+    // the club-members Access group. CF_ACCOUNT_ID and CF_API_TOKEN are secrets;
+    // until this id is filled in, such invites fail with "Access sync isn't
+    // configured". See docs/cloudflare.md "Access sync on invite".
     "CF_ACCESS_GROUP_ID": "REPLACE_WITH_CLUB_MEMBERS_ACCESS_GROUP_ID"
   }
 }

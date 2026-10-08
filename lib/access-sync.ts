@@ -61,8 +61,9 @@ async function releaseLock(token: string) { await db().prepare('DELETE FROM acce
 function ruleEmail(rule: Rule) { return typeof rule.email?.email === 'string' ? rule.email.email.toLowerCase() : null; }
 function config() {
   const account = env.CF_ACCOUNT_ID, group = env.CF_ACCESS_GROUP_ID, token = env.CF_API_TOKEN;
-  if (!account || !group || !token || account.startsWith('REPLACE_WITH_') || group.startsWith('REPLACE_WITH_'))
-    throw new ClubError("Access sync isn't configured, so this player's email can't be given sign-in access. The site owner needs to set CF_ACCOUNT_ID, CF_ACCESS_GROUP_ID and the CF_API_TOKEN secret (see docs/cloudflare.md).", 503);
+  // CF_ACCESS_GROUP_ID ships as a wrangler.jsonc placeholder until the owner fills it in; that counts as not configured.
+  if (!account || !group || !token || group.startsWith('REPLACE_WITH_'))
+    throw new ClubError("Access sync isn't configured, so this player's email can't be given sign-in access. The site owner needs to set the CF_ACCOUNT_ID and CF_API_TOKEN secrets and the CF_ACCESS_GROUP_ID var (see docs/cloudflare.md).", 503);
   return { url: `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(account)}/access/groups/${encodeURIComponent(group)}`, token };
 }
 async function request(url: string, token: string, method: 'GET' | 'PUT', body?: Group): Promise<Group> {

@@ -140,7 +140,7 @@ A seat is taken the first time a person signs in, and it stays taken. With "Ever
 - **Removing (archiving) a player** takes their `accessEmail` out of the group.
 - **Emails added by hand stay put.** If an invited player's email is already in the group, the app leaves it unmanaged and never removes it.
 - **50-seat cap:** the app refuses an invite that would put more than 50 emails in the group, because the Zero Trust Free plan has 50 seats. Free one by removing a departed member from the group and from the Users page.
-- **Failures:** if the Cloudflare call fails, nothing is saved and the admin sees an error. If the club save fails after the group was changed (someone else saved first), the app puts the group back. Only one Access change runs at a time: a lock row in D1 (`access_sync_lock`) makes a second admin's change at the same moment fail with "try again in a moment" instead of overwriting the first. If `CF_ACCOUNT_ID`, `CF_ACCESS_GROUP_ID` or `CF_API_TOKEN` is missing, inviting a player who has an email fails with "Access sync isn't configured".
+- **Failures:** if the Cloudflare call fails, nothing is saved and the admin sees an error. If the club save fails after the group was changed (someone else saved first), the app puts the group back. Only one Access change runs at a time: a lock row in D1 (`access_sync_lock`) makes a second admin's change at the same moment fail with "try again in a moment" instead of overwriting the first. If `CF_ACCOUNT_ID` or `CF_API_TOKEN` is missing, or `CF_ACCESS_GROUP_ID` is missing or still its placeholder, inviting a player who has an email fails with "Access sync isn't configured".
 - **Logs** record only the HTTP status and email counts, never the token or any email.
 
 **Cloudflare API calls** ([Access groups API](https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/groups/methods/update/)): `GET` then `PUT` on `https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/access/groups/{CF_ACCESS_GROUP_ID}` with `Authorization: Bearer <CF_API_TOKEN>`. The PUT body is the group's `name`, `include`, `exclude`, `require` and `is_default`; an email rule is `{"email": {"email": "player@example.com"}}`.
@@ -149,9 +149,9 @@ A seat is taken the first time a person signs in, and it stays taken. With "Ever
 
 1. **Create the API token.** In the Cloudflare dashboard go to My Profile → API Tokens → Create Token → Custom token. Give it one permission, **Account → Access: Organizations, Identity Providers, and Groups → Edit**, and under Account Resources include **only this club's account**. Don't add any other permission.
 2. **Store it as a Worker secret:** `npx wrangler secret put CF_API_TOKEN`, then paste the token. It is never written to the repo or to GitHub.
-3. **Find the account ID:** it's shown as "Account ID" on the account's Workers & Pages overview in the dashboard. Put it in `wrangler.jsonc` as `CF_ACCOUNT_ID`.
+3. **Store the account ID as a Worker secret:** it's shown as "Account ID" on the account's Workers & Pages overview in the dashboard. Run `npx wrangler secret put CF_ACCOUNT_ID` and paste it, so it stays out of the repo.
 4. **Find the Club members group ID:** list the account's Access groups with the new token and copy the `id` of the "Club members" group: `curl -s -H "Authorization: Bearer $CF_API_TOKEN" https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/access/groups`. Put it in `wrangler.jsonc` as `CF_ACCESS_GROUP_ID`.
-5. Deploy. The Deploy workflow refuses to run while either value is still a `REPLACE_WITH_` placeholder.
+5. Deploy. Until the group ID is filled in (it ships as a `REPLACE_WITH_` placeholder) or while a secret is missing, the site deploys and runs normally, but inviting a player who has an email fails with "Access sync isn't configured".
 
 Keep the Access policy's Allow rule pointed at the Club members group only, never "Everyone". The app adds only invited emails to that group, so only invited people can take a seat.
 
@@ -164,7 +164,7 @@ Keep the Access policy's Allow rule pointed at the Club members group only, neve
 - **Worker name:** `hrsc-prithvi`, built by `pnpm build` into `dist/`.
 - **Address:** `routes: [{ pattern: "prithvifc.ca", custom_domain: true }]`. The deploy attaches the domain and creates its DNS record, so there's no clicking around in the dashboard.
 - **No second address:** `workers_dev: false` turns off the extra `*.workers.dev` address, so the site lives at exactly one URL.
-- **Settings and secrets:** the database ID, Access team URL, AUD tag and R2 limits are plain `vars`, not secrets. The account ID and Club members group ID for Access sync are `vars` too. The two secrets, `CLUB_SETUP_KEY` and `CF_API_TOKEN`, are set separately with `wrangler secret put` and never stored in the repo.
+- **Settings and secrets:** the database ID, Access team URL, AUD tag and R2 limits are plain `vars`, not secrets. The Club members group ID for Access sync is a `var` too. The secrets, `CLUB_SETUP_KEY`, `CF_ACCOUNT_ID` and `CF_API_TOKEN`, are set separately with `wrangler secret put` and never stored in the repo.
 
 **Plan:** Workers Free allows 100,000 requests a day. Past that, requests are refused rather than billed. On 2 October 2026 the account owner checked Workers & Pages → Plans in the dashboard and confirmed there is no paid Workers plan, so the account is on Workers Free. This was a dashboard check, not an API check.
 
@@ -229,9 +229,7 @@ The gap below the free tier covers anything done outside the app, such as files 
 
 ```mermaid
 flowchart LR
-  verify["Verify<br/>every PR + push"] --> check{"Placeholders<br/>left?"}
-  check -->|yes| refuse([Refuse])
-  check -->|no| migrate["Migrate D1<br/>--remote"]
+  verify["Verify<br/>every PR + push"] --> migrate["Migrate D1<br/>--remote"]
   migrate --> build[Build]
   build --> deploy[Deploy]
 ```
@@ -245,7 +243,7 @@ flowchart LR
 - the build
 - the integration test against a local emulator, which never touches production
 
-**Deploy** runs only when started by hand from `main`. It refuses while any `REPLACE_WITH_` placeholder is left in `wrangler.jsonc`, then applies D1 migrations, builds, and runs `wrangler deploy`.
+**Deploy** runs only when started by hand from `main`. It applies D1 migrations, builds, and runs `wrangler deploy`.
 
 **Repo secrets** on `ojdh/HRSC-Prithvi`:
 
@@ -264,7 +262,7 @@ The original repo belongs to a different GitHub account (`sujay1059/HRSC-Prithvi
 <details>
 <summary>A bug found before the first deploy</summary>
 
-The placeholder check first used `grep REPLACE_WITH_ wrangler.jsonc`. That also matched the explanatory comment at the top of the file, so it would have refused to deploy even with every value filled in. It now skips comment lines and still catches a placeholder anywhere in a value, including inside the team URL. Fixed in PR #2.
+The placeholder check first used `grep REPLACE_WITH_ wrangler.jsonc`. That also matched the explanatory comment at the top of the file, so it would have refused to deploy even with every value filled in. It now skips comment lines and still catches a placeholder anywhere in a value, including inside the team URL. Fixed in PR #2. The check was later removed (PR #19): the only placeholder left, the Access sync group ID, makes invites fail with a clear message at run time instead of blocking every deploy.
 
 </details>
 
@@ -285,7 +283,7 @@ The placeholder check first used `grep REPLACE_WITH_ wrangler.jsonc`. That also 
 | Cloudflare API token (deploys) | Yes | GitHub repo secret only |
 | `CF_API_TOKEN` (Access sync, Access groups edit only) | Yes | Worker secret only |
 | `CLUB_SETUP_KEY` | Yes | Worker secret, plus a private file for the organiser |
-| Account ID | Not strictly | GitHub repo secret, and `CF_ACCOUNT_ID` in `wrangler.jsonc` for Access sync |
+| Account ID | Not strictly, but not published | GitHub repo secret, and the `CF_ACCOUNT_ID` Worker secret for Access sync |
 | Club members Access group ID | No | `CF_ACCESS_GROUP_ID` in `wrangler.jsonc` |
 | D1 database ID, Access team URL, AUD tag, R2 limits | No | `wrangler.jsonc` (they identify resources and grant no access) |
 
@@ -302,7 +300,7 @@ The placeholder check first used `grep REPLACE_WITH_ wrangler.jsonc`. That also 
 **Still to do:**
 
 - [ ] The organiser signs in at `prithvifc.ca/winterleague`, enters the setup key, rebuilds the squads and sends invitations. Enter each player's email on their placeholder before inviting them; the invite adds it to the Club members rule group.
-- [ ] Set up Access sync: create the `CF_API_TOKEN` token, store it with `wrangler secret put`, and fill in `CF_ACCOUNT_ID` and `CF_ACCESS_GROUP_ID` (see Access sync on invite).
+- [ ] Set up Access sync: create the `CF_API_TOKEN` token, store it and `CF_ACCOUNT_ID` with `wrangler secret put`, and fill in `CF_ACCESS_GROUP_ID` in `wrangler.jsonc` (see Access sync on invite).
 - [ ] Decide on the old data. The new site starts empty, so this is a fresh start unless old data is imported from ChatGPT Sites later. Importing would mean remapping player accounts and adding a ledger row for each imported file.
 - [ ] Shut down the ChatGPT Sites copy once players have moved over.
 - [ ] Separate from Cloudflare: the web app manifest, home-screen icons and service worker are referenced but not in the repo, so "Add to Home Screen" can't install yet.
