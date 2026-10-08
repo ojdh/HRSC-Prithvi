@@ -279,6 +279,25 @@ try{
   const photoFile=()=>new File([pngBytes],'avatar.png',{type:'image/png'}),clipFile=()=>new File([clipBytes],'clip.mp4',{type:'video/mp4'});
   async function setUp(instance){await migrate(instance);const r=await instance.dispatchFetch(origin+'/api/club',{method:'POST',headers:await headers('owner'),body:JSON.stringify({action:'initialize',key:'test-setup-secret',name:'Organiser',team:'red',revision:0})});assert.equal(r.status,200);const club=await (await instance.dispatchFetch(origin+'/api/club',{headers:await headers('owner')})).json();return club.players[0].id}
   async function storedObjects(instance){return (await (await instance.getR2Bucket('BUCKET')).list()).objects.length}
+  // Team photos: admins upload a crest picture per team; members can view it.
+  const objectsBefore=await storedObjects(mf),bucket=await mf.getR2Bucket('BUCKET');
+  ok((await send(mf,'/api/photo','black-user',{target:'team',team:'black',photo:photoFile()})).status===403,'players cannot upload team photos');
+  ok(await storedObjects(mf)===objectsBefore,'refused team photo stores nothing');
+  ok((await send(mf,'/api/photo','owner',{target:'team',team:'purple',photo:photoFile()})).status===400,'unknown team rejected');
+  ok((await send(mf,'/api/photo','owner',{target:'team',team:'black',photo:new File([Buffer.from('not an image')],'x.png',{type:'image/png'})})).status===400,'team photo must be an image');
+  ok((await send(mf,'/api/photo','owner',{target:'team',team:'black',photo:photoFile()})).status===200,'admin uploads a team photo');
+  const firstCrest=(await get('black-user')).data.teams.black.photo;
+  ok(/^teams\//.test(firstCrest),'team photo saved on the team');
+  ok((await mf.dispatchFetch(origin+'/api/photo?key='+encodeURIComponent(firstCrest),{headers:await headers('black-user')})).status===200,'members see team photos');
+  ok((await mf.dispatchFetch(origin+'/api/photo?key='+encodeURIComponent(firstCrest))).status===401,'team photos need sign-in');
+  await success('editTeam',{team:'black',name:'Tigers',letter:'T',color:'#1f7a4d',motto:'Hunt as one.'});
+  ok((await get()).data.teams.black.photo===firstCrest,'editing a team keeps its photo');
+  ok((await send(mf,'/api/photo','owner',{target:'team',team:'black',photo:photoFile()})).status===200,'admin replaces a team photo');
+  const secondCrest=(await get()).data.teams.black.photo;
+  ok(secondCrest!==firstCrest&&!(await bucket.head(firstCrest)),'replaced team photo is deleted');
+  ok((await mf.dispatchFetch(origin+'/api/photo?team=black',{method:'DELETE',headers:await headers('black-user')})).status===403,'players cannot remove team photos');
+  ok((await mf.dispatchFetch(origin+'/api/photo?team=black',{method:'DELETE',headers:await headers('owner')})).status===200,'admin removes a team photo');
+  ok(!(await get()).data.teams.black.photo&&!(await bucket.head(secondCrest)),'removed team photo and its object are gone');
   const tight=new Miniflare({...workerOptions,bindings:{...accessBindings,...budget({storage:pngBytes.length+clipBytes.length,classA:4,classB:1})}});
   try{
     const ownerId=await setUp(tight);

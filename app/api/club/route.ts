@@ -92,7 +92,7 @@ export async function POST(req:Request){try{
     }else if(action==='editTeam'){
       const input=z.object({team,name:z.string().trim().min(1).max(30),letter:z.string().trim().min(1).max(2).transform(s=>s.toUpperCase()),color:z.string().regex(/^#[0-9a-fA-F]{6}$/,'Choose a colour like #1f7a4d.').transform(s=>s.toLowerCase()),motto:z.string().trim().max(60)}).parse(body);
       check(TEAMS.every(t=>t===input.team||club.teams[t].name.toLowerCase()!==input.name.toLowerCase()),'Each team needs its own name.');
-      club.teams[input.team]={name:input.name,color:input.color,letter:input.letter,motto:input.motto};
+      club.teams[input.team]={...club.teams[input.team],name:input.name,color:input.color,letter:input.letter,motto:input.motto};
     }else if(action==='invite'){
       const p=club.players.find(p=>p.id===body.playerId&&p.active!==false);check(p,'Active player not found.');check(!p.userId,'This player already has an account.');
       if(!p.inviteToken){if(p.inviteHash)p.legacyInviteHash=p.inviteHash;p.inviteToken=token();p.inviteHash=await digest(p.inviteToken);}extra={invite:p.inviteToken};
