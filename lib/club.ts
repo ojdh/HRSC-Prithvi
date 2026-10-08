@@ -40,14 +40,16 @@ export function teamStats(days:Day[]){
   }
   return stats.sort((a,b)=>b.wins-a.wins||b.gd-a.gd||b.gf-a.gf);
 }
+// attended counts played matchdays (at least one round) the player was marked attending; attendance is that share as a whole percent.
 export function playerStats(players:Player[],days:Day[]){
+  const playedDays=days.filter(d=>d.rounds.length);
   return players.map(p=>{
-    let played=0,wins=0,goals=0,assists=0;
+    let played=0,wins=0,goals=0,assists=0;const attended=playedDays.filter(d=>d.roster.some(x=>x.id===p.id)).length;
     for(const d of days){const team=d.roster.find(x=>x.id===p.id)?.team;
       for(const r of d.rounds){if(r.lineup.includes(p.id)){played++;if(r.winner===team)wins++;}
         for(const g of r.goals){if(!g.ownGoal&&g.scorer===p.id)goals++;if(!g.ownGoal&&g.assist===p.id)assists++;}}
     }
-    return {...p,played,wins,goals,assists};
+    return {...p,played,wins,goals,assists,attended,attendance:playedDays.length?Math.round(attended/playedDays.length*100):0};
   }).sort((a,b)=>b.goals-a.goals||b.assists-a.assists||b.wins-a.wins||a.name.localeCompare(b.name));
 }
 export function dateLabel(date:string,short=false){return new Intl.DateTimeFormat('en-CA',{month:short?'short':'long',day:'numeric',...(short?{}:{year:'numeric'}),timeZone:'UTC'}).format(new Date(date+'T12:00:00Z'));}

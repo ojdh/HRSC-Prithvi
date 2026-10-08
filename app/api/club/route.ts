@@ -106,9 +106,13 @@ export async function POST(req:Request){try{
     }else if(action==='setupDay'){
       const input=z.object({dayId:id,roster:z.array(id).min(3),a:team,b:team,firstExit:team}).parse(body);const day=editableDay(club,input.dayId,'Attendance is locked after voting opens or results are entered.');
       check(input.a!==input.b,'Choose two different opening teams.');check([input.a,input.b].includes(input.firstExit),'The first draw exit must be an opening team.');
-      const roster=[...new Set(input.roster)].map(pid=>{const p=club.players.find(x=>x.id===pid&&x.active!==false);check(p,'An active attending player is missing.');return {id:p.id,team:p.team};});
+      const roster=[...new Set(input.roster)].map(pid=>attendee(club,pid));
       check(TEAMS.every(t=>roster.some(p=>p.team===t)),'Mark at least one attending player from each team.');
       Object.assign(day,{roster,opening:[input.a,input.b],firstExit:input.firstExit});
+    }else if(action==='addAttendee'){
+      const input=z.object({dayId:id,playerId:id}).parse(body);const day=club.days.find(d=>d.id===input.dayId);check(day,'Match day not found.');
+      check(isReady(day),'Set up the matchday before adding late arrivals.');check(day.poll==='ready','Attendance is locked once voting opens.');
+      check(!day.roster.some(r=>r.id===input.playerId),'This player is already marked as attending.');day.roster.push(attendee(club,input.playerId));
     }else if(action==='editDay'){
       const input=slot.extend({dayId:id,date}).refine(...endsAfterStart).parse(body);const day=editableDay(club,input.dayId,'Match days cannot be moved after voting opens or results are entered.');
       check(!club.days.some(d=>d.id!==day.id&&d.date===input.date),'There is already a match day on that date.');Object.assign(day,{date:input.date,start:input.start,end:input.end});
@@ -116,9 +120,8 @@ export async function POST(req:Request){try{
       const day=editableDay(club,id.parse(body.dayId),'Match days cannot be cancelled after voting opens or results are entered.');check(!day.videoKey,'Remove the matchday clip before cancelling this match day.');
       club.days=club.days.filter(d=>d.id!==day.id);
     }else if(action==='addRound'){
-      const input=z.object({dayId:id,scoreA:z.number().int().min(0).max(2),scoreB:z.number().int().min(0).max(2),lineup:z.array(id).min(2),goals:z.array(z.object({team,scorer:id.nullable(),assist:id.nullable(),ownGoal:z.boolean()})).max(3)}).parse(body);
+      const input=z.object({dayId:id,scoreA:z.number().int().min(0).max(20),scoreB:z.number().int().min(0).max(20),lineup:z.array(id).min(2),goals:z.array(z.object({team,scorer:id.nullable(),assist:id.nullable(),ownGoal:z.boolean()})).max(40)}).parse(body);
       const day=club.days.find(d=>d.id===input.dayId);check(day,'Match day not found.');check(isReady(day),'Set attendance and opening teams first.');const n=nextMatch(day);
-      check(!(input.scoreA===2&&input.scoreB===2),'A round ends as soon as a team scores two goals.');
       const lineup=[...new Set(input.lineup)];check(lineup.every(pid=>day.roster.some(p=>p.id===pid&&[n.a,n.b].includes(p.team))),'Only attending players on the two playing teams can appear.');
       check([n.a,n.b].every(t=>day.roster.some(p=>p.team===t&&lineup.includes(p.id))),'Include at least one player from each playing team.');
       check(input.goals.filter(g=>g.team===n.a).length===input.scoreA&&input.goals.filter(g=>g.team===n.b).length===input.scoreB&&input.goals.length===input.scoreA+input.scoreB,'Goal entries must match the score.');
@@ -138,4 +141,5 @@ export async function POST(req:Request){try{
   }
   await saveClub(club,revision);const reply=response({ok:true,...extra});if(action==='claim')reply.headers.set('Set-Cookie',inviteCookie('',new URL(req.url).protocol==='https:'));return reply;
 }catch(e){return fail(e);}}
+function attendee(club:Club,playerId:string){const p=club.players.find(x=>x.id===playerId&&x.active!==false);check(p,'An active attending player is missing.');return {id:p.id,team:p.team};}
 function editableDay(club:Club,dayId:string,locked:string){const day=club.days.find(d=>d.id===dayId);check(day,'Match day not found.');check(day.poll==='ready'&&!day.rounds.length,locked);return day;}
