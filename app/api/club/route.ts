@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { z } from 'zod';
 import { getUser } from '../../auth';
-import { TEAMS,DEFAULT_TEAMS,MAX_SERIES_DAYS,DELETION_APPROVALS,LOG_LIMIT,nextMatch,incumbentAt,result,snapshot,isPlayed,emptyClub,isReady,isVideoUrl,validDate,weeklyDates,clubToday,type Club,type Day,type Team,type LogEntry } from '@/lib/club';
+import { TEAMS,DEFAULT_TEAMS,MAX_SERIES_DAYS,DELETION_APPROVALS,LOG_LIMIT,nextMatch,incumbentAt,result,snapshot,isPlayed,emptyClub,isReady,isVideoUrl,validDate,weeklyDates,clubToday,type Club,type Day,type Team,type DayLogEntry } from '@/lib/club';
 import { db,readClub,saveClub,check,digest,token,role,ClubError } from '@/lib/server-club';
 import {pendingInvite,findInvitation,inviteCookie} from '@/lib/server-invitations';
 import {deleteObject} from '@/lib/r2-budget';
@@ -194,7 +194,7 @@ function playedLineup(day:Day,a:Team,b:Team,input:z.infer<typeof roundInput>){
 }
 // The edit log names people by player id, so these actions need the admin's player profile.
 function actor(me:{id:string}|undefined){check(me,'Link your player profile before changing match records.',403);return me.id;}
-function record(club:Club,by:string,action:LogEntry['action'],day:Day,details:Pick<LogEntry,'roundId'|'before'|'after'>={}){
+function record(club:Club,by:string,action:DayLogEntry['action'],day:Day,details:Pick<DayLogEntry,'roundId'|'before'|'after'>={}){
   club.log=[{id:crypto.randomUUID(),at:new Date().toISOString(),by,action,dayId:day.id,date:day.date,...details},...(club.log??[])].slice(0,LOG_LIMIT);
 }
 // Deletes the day once the owner has approved or enough current admins have. Approvals from people who are no

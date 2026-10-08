@@ -18,10 +18,25 @@ export type DayDeletion = {requestedBy:string;approvals:string[]};
 export const DELETION_APPROVALS=3;
 // A game as the edit log records it: the score and goals, without the lineup.
 export type RoundSnapshot = Pick<Round,'a'|'b'|'scoreA'|'scoreB'|'winner'|'exit'|'goals'>;
-export type LogAction = 'editRound'|'undoRound'|'requestDayDeletion'|'approveDayDeletion'|'cancelDayDeletion'|'deleteDay';
+export type DayLogAction = 'editRound'|'undoRound'|'requestDayDeletion'|'approveDayDeletion'|'cancelDayDeletion'|'deleteDay';
+export type BoardLogAction = 'removePost'|'removeComment';
+export type LogAction = DayLogAction|BoardLogAction;
 // Admin-only history of corrections and deletions, newest first. by is a player id; date keeps an entry readable once its day is gone.
-export type LogEntry = {id:string;at:string;by:string;action:LogAction;dayId:string;date:string;roundId?:string;before?:RoundSnapshot;after?:RoundSnapshot};
+export type DayLogEntry = {id:string;at:string;by:string;action:DayLogAction;dayId:string;date:string;roundId?:string;before?:RoundSnapshot;after?:RoundSnapshot};
+// An admin removing someone else's board post or comment. author is a player id; the text is never kept.
+export type BoardLogEntry = {id:string;at:string;by:string;action:BoardLogAction;team:Team;author:string};
+export type LogEntry = DayLogEntry|BoardLogEntry;
 export const LOG_LIMIT=500;
+// Team boards: each team's private discussion. Authors are player ids, created times are unix milliseconds,
+// and reactions map an emoji to the players who chose it.
+export const BOARD_REACTIONS=['👍','❤️','😂','🔥','⚽','👏'] as const;
+export type BoardReaction=typeof BOARD_REACTIONS[number];
+export const BOARD_LIMITS={post:2000,comment:1000,postImages:4,commentImages:1,comments:50,page:20} as const;
+export type BoardReactions=Partial<Record<BoardReaction,string[]>>;
+export type BoardComment={id:string;author:string;body:string;createdAt:number;image:string|null;reactions:BoardReactions};
+export type BoardPost={id:string;team:Team;author:string;body:string;createdAt:number;images:string[];reactions:BoardReactions;comments:BoardComment[]};
+// next is the cursor for the following page, or null on the last page.
+export type BoardPage={posts:BoardPost[];next:string|null};
 // adminId is the owner's account: the only person who can grant or remove admin rights. admins holds player ids.
 export type Club = {adminId:string;admins:string[];teams:Record<Team,TeamInfo>;players:Player[];days:Day[];log?:LogEntry[]};
 export type PublicClub = {invitation?:{name:string;team:Team};players:Player[];days:Day[];revision:number;initialized:boolean;isAdmin:boolean;isOwner:boolean;owner:string|null;admins:string[];teams:Record<Team,TeamInfo>;me:string|null;log?:LogEntry[];polls:Record<string,{count:number;voted:boolean;tally:{candidate:string;votes:number}[]}>};

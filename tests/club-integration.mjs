@@ -307,7 +307,8 @@ try{
   ok(p.find(x=>x.id===owner.id).goals===2&&p.find(x=>x.id===red.id).assists===1&&p.find(x=>x.id===red.id).played===1,'goals assists and selective appearances correct');
   // Free-tier guardrails: tiny R2 budgets that the steps below hit exactly.
   const pngBytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jq24AAAAASUVORK5CYII=','base64');
-  async function send(instance,path,user,fields){const f=new FormData();for(const [k,v] of Object.entries(fields))f.set(k,v);const req=new Request(origin+path,{method:'POST',headers:{Origin:origin,'Cf-Access-Jwt-Assertion':await accessToken(user)},body:f});const r=await instance.dispatchFetch(req.url,{method:'POST',headers:Object.fromEntries(req.headers),body:await req.arrayBuffer()});return {status:r.status,error:(await r.json()).error}}
+  // An array value sends that field once per item, as a multi-file input does.
+  async function send(instance,path,user,fields){const f=new FormData();for(const [k,v] of Object.entries(fields))for(const item of [v].flat())f.append(k,item);const req=new Request(origin+path,{method:'POST',headers:{Origin:origin,'Cf-Access-Jwt-Assertion':await accessToken(user)},body:f});const r=await instance.dispatchFetch(req.url,{method:'POST',headers:Object.fromEntries(req.headers),body:await req.arrayBuffer()});const body=await r.json();return {status:r.status,error:body.error,data:body}}
   const photoFile=()=>new File([pngBytes],'avatar.png',{type:'image/png'}),clipFile=()=>new File([clipBytes],'clip.mp4',{type:'video/mp4'});
   async function setUp(instance){await migrate(instance);const r=await instance.dispatchFetch(origin+'/api/club',{method:'POST',headers:await headers('owner'),body:JSON.stringify({action:'initialize',key:'test-setup-secret',name:'Organiser',team:'red',revision:0})});assert.equal(r.status,200);const club=await (await instance.dispatchFetch(origin+'/api/club',{headers:await headers('owner')})).json();return club.players[0].id}
   async function storedObjects(instance){return (await (await instance.getR2Bucket('BUCKET')).list()).objects.length}
@@ -545,7 +546,9 @@ try{
     ok((await send(janitor,'/api/photo','owner',{target:'team',team:'red',photo:photoFile()})).status===200,'clean-up fixture: team photo stored');
     ok((await send(janitor,'/api/video','owner',{target:'profile',playerId:ownerId,kind:'Goal',video:clipFile()})).status===200,'clean-up fixture: highlight stored');
     ok((await send(janitor,'/api/video','owner',{target:'matchday',dayId:cleanupDay,video:clipFile()})).status===200,'clean-up fixture: matchday clip stored');
-    const fixture=await clubOf(),referenced=[fixture.players[0].photo,fixture.players[0].highlights[0].key,fixture.teams.red.photo,fixture.days[0].videoKey];
+    ok((await send(janitor,'/api/board','owner',{action:'createPost',team:'red',body:'Kit photos',images:photoFile()})).status===200,'clean-up fixture: board image stored');
+    const boardKey=(await (await janitor.dispatchFetch(origin+'/api/board?team=red',{headers:await headers('owner')})).json()).posts[0].images[0];
+    const fixture=await clubOf(),referenced=[fixture.players[0].photo,fixture.players[0].highlights[0].key,fixture.teams.red.photo,fixture.days[0].videoKey,boardKey];
     const ledger=await janitor.getD1Database('DB');
     ok((await ledger.prepare('SELECT count(*) AS n FROM r2_objects WHERE created_at>=unixepoch()-60').first()).n===referenced.length,'uploads record when they were stored');
     await ledger.prepare('UPDATE r2_objects SET created_at=unixepoch()-7200').run();
@@ -571,6 +574,105 @@ try{
     ok(await inBucket(orphans.fresh)&&await inLedger(orphans.fresh),'object uploaded within the last hour kept');
     for(const key of referenced)ok(await inBucket(key)&&await inLedger(key),'referenced object kept: '+key.split('/')[0]);
   }finally{await janitor.dispose();await rm(storageDir,{recursive:true,force:true})}
+  // Team boards: each team's private discussion. Admins read and moderate every board.
+  async function clubCall(instance,action,body={},user='owner'){const read=await (await instance.dispatchFetch(origin+'/api/club',{headers:await headers(user)})).json();const r=await instance.dispatchFetch(origin+'/api/club',{method:'POST',headers:await headers(user),body:JSON.stringify({action,revision:read.revision,...body})});const reply=await r.json();assert.equal(r.status,200,action+': '+JSON.stringify(reply));return reply}
+  async function linkMember(instance,name,team,user){await clubCall(instance,'addPlayer',{...fields,name,team});const id=(await (await instance.dispatchFetch(origin+'/api/club',{headers:await headers('owner')})).json()).players.find(p=>p.name===name).id;await clubCall(instance,'claim',{token:(await clubCall(instance,'invite',{playerId:id})).invite},user);return id}
+  const boards=new Miniflare({...workerOptions,bindings:{...accessBindings,...budget({storage:1e9,classA:1e6,classB:1e7})}});
+  try{
+    // Arrange: two red players, one black player and one archived white player
+    const ownerId=await setUp(boards);
+    const redId=await linkMember(boards,'Board red','red','board-red'),red2Id=await linkMember(boards,'Board red two','red','board-red2');
+    await linkMember(boards,'Board black','black','board-black');
+    await clubCall(boards,'archivePlayer',{playerId:await linkMember(boards,'Board gone','white','board-gone')});
+    const readBoard=async(user,team,before)=>{const r=await boards.dispatchFetch(origin+'/api/board?team='+team+(before?'&before='+encodeURIComponent(before):''),{headers:user?await headers(user):{}});return {status:r.status,data:r.status===200?await r.json():null}};
+    const boardSend=(user,values)=>send(boards,'/api/board',user,values);
+    const boardImage=async(user,key)=>boards.dispatchFetch(origin+'/api/board/image?key='+encodeURIComponent(key),{headers:user?await headers(user):{}});
+    const react=(user,targetId,emoji)=>boardSend(user,{action:'react',targetId,emoji});
+    const boardDb=await boards.getD1Database('DB'),boardBucket=await boards.getR2Bucket('BUCKET');
+    const rows=async table=>(await boardDb.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first('n'));
+    const inLedger=async key=>!!(await boardDb.prepare('SELECT 1 AS found FROM r2_objects WHERE key=?').bind(key).first());
+    // Privacy
+    const created=await boardSend('board-red',{action:'createPost',team:'red',body:'Training moved to 7.\nBring both kits.',images:[photoFile(),photoFile()]});
+    ok(created.status===200,'player posts with two photos on their own team board: '+JSON.stringify(created));
+    const redBoard=await readBoard('board-red','red'),post=redBoard.data?.posts[0];
+    ok(redBoard.status===200&&post.body==='Training moved to 7.\nBring both kits.'&&post.author===redId&&post.team==='red'&&post.images.length===2,'player reads their own team board');
+    ok((await readBoard('board-red','black')).status===403,'another team’s board is private');
+    ok((await boardSend('board-red',{action:'createPost',team:'black',body:'Hello rivals'})).status===403,'players cannot post on another team’s board');
+    ok((await Promise.all(['red','black','white'].map(t=>readBoard('owner',t)))).every(r=>r.status===200),'admins read every board');
+    ok((await boardSend('owner',{action:'createPost',team:'black',body:'From the owner'})).status===403,'admins moderate other boards but do not post on them');
+    ok((await readBoard(null,'red')).status===401,'boards need sign-in');
+    ok((await readBoard('board-gone','white')).status===403,'archived players lose their board');
+    ok((await readBoard('intruder','red')).status===403,'non-members cannot read boards');
+    ok((await readBoard('owner','purple')).status===400,'unknown board rejected');
+    for(const key of post.images){const r=await boardImage('board-red2',key);ok(r.status===200&&r.headers.get('content-type')==='image/png'&&/^private/.test(r.headers.get('cache-control')),'teammates see post photos privately')}
+    ok((await boardImage('board-black',post.images[0])).status===403,'another team’s board photo is private');
+    ok((await boardImage(null,post.images[0])).status===401,'board photos need sign-in');
+    ok((await boardImage('owner','board/'+crypto.randomUUID())).status===404,'unknown board photo not found');
+    // Posting limits: refused before anything is stored
+    const objectsBefore=await storedObjects(boards),postsBefore=await rows('board_posts');
+    ok((await boardSend('board-red',{action:'createPost',team:'red',body:'Too many',images:Array.from({length:5},photoFile)})).status===400,'a post holds at most four photos');
+    ok((await boardSend('board-red',{action:'createPost',team:'red',body:'Not a photo',images:new File([Buffer.from('not an image')],'x.png',{type:'image/png'})})).status===400,'board photos must be images');
+    ok((await boardSend('board-red',{action:'createPost',team:'red',body:'   '})).status===400,'a post needs text');
+    ok((await boardSend('board-red',{action:'createPost',team:'red',body:'x'.repeat(2001)})).status===400,'posts are capped at 2000 characters');
+    ok(await storedObjects(boards)===objectsBefore&&await rows('board_posts')===postsBefore,'refused posts store nothing');
+    // Comments and reactions
+    ok((await boardSend('board-red2',{action:'comment',postId:post.id,body:'On my way',images:photoFile()})).status===200,'teammate comments with a photo');
+    let fresh=(await readBoard('board-red','red')).data.posts[0];const comment=fresh.comments[0];
+    ok(fresh.comments.length===1&&comment.author===red2Id&&comment.body==='On my way'&&!!comment.image&&(await boardImage('board-red',comment.image)).status===200,'the comment and its photo appear on the post');
+    ok((await boardSend('board-red2',{action:'comment',postId:post.id,body:'Two photos',images:[photoFile(),photoFile()]})).status===400,'a comment holds one photo');
+    ok((await boardSend('board-red2',{action:'comment',postId:post.id,body:'x'.repeat(1001)})).status===400,'comments are capped at 1000 characters');
+    ok((await boardSend('board-black',{action:'comment',postId:post.id,body:'Sneaky'})).status===403,'other teams cannot comment');
+    ok((await react('board-red2',post.id,'🔥')).status===200&&(await react('board-red',comment.id,'👏')).status===200,'teammates react to posts and comments');
+    fresh=(await readBoard('board-red','red')).data.posts[0];
+    ok(JSON.stringify(fresh.reactions)===JSON.stringify({'🔥':[red2Id]})&&JSON.stringify(fresh.comments[0].reactions)===JSON.stringify({'👏':[redId]}),'reactions show who reacted');
+    ok((await react('board-red2',post.id,'🔥')).status===200&&!(await readBoard('board-red','red')).data.posts[0].reactions['🔥'],'a second tap removes the reaction');
+    ok((await react('board-red2',post.id,'💩')).status===400,'only the fixed reactions are allowed');
+    ok((await react('board-black',post.id,'👍')).status===403,'other teams cannot react');
+    await react('board-red2',post.id,'👍');
+    // Deleting: the author or an admin
+    ok((await boardSend('board-red2',{action:'deletePost',postId:post.id})).status===403,'a teammate cannot delete someone else’s post');
+    const postKeys=[...post.images,comment.image];
+    ok((await boardSend('board-red',{action:'deletePost',postId:post.id})).status===200,'the author deletes their own post');
+    ok(!(await readBoard('board-red','red')).data.posts.some(p=>p.id===post.id),'the deleted post leaves the board');
+    ok(await rows('board_comments')===0&&await rows('board_reactions')===0&&await rows('board_images')===0,'its comments, reactions and photo records are gone');
+    for(const key of postKeys)ok(!(await boardBucket.head(key))&&!await inLedger(key),'its stored photos are deleted');
+    const adminLog=async()=>(await (await boards.dispatchFetch(origin+'/api/club',{headers:await headers('owner')})).json()).log;
+    ok((await adminLog()).length===0,'an author deleting their own post is not logged');
+    await boardSend('board-red',{action:'createPost',team:'red',body:'Secret team talk'});
+    const victim=(await readBoard('owner','red')).data.posts[0];
+    ok((await boardSend('owner',{action:'deletePost',postId:victim.id})).status===200,'an admin removes another player’s post');
+    let log=await adminLog();
+    ok(log.length===1&&log[0].action==='removePost'&&log[0].by===ownerId&&log[0].team==='red'&&log[0].author===redId&&Date.parse(log[0].at)<=Date.now(),'the removal is logged with who, which team, the author and when');
+    ok(!JSON.stringify(log).includes('Secret team talk'),'the log never records the post text');
+    await boardSend('board-red',{action:'createPost',team:'red',body:'Kit colours?'});
+    const thread=(await readBoard('board-red','red')).data.posts[0];
+    await boardSend('board-red2',{action:'comment',postId:thread.id,body:'Red, obviously',images:photoFile()});
+    await boardSend('board-red',{action:'comment',postId:thread.id,body:'Agreed'});
+    const [ownComment,otherComment]=(await readBoard('board-red','red')).data.posts[0].comments;
+    ok((await boardSend('board-red',{action:'deleteComment',commentId:ownComment.id})).status===403,'a teammate cannot delete someone else’s comment');
+    ok((await boardSend('board-red2',{action:'deleteComment',commentId:ownComment.id})).status===200&&!(await boardBucket.head(ownComment.image))&&await rows('board_images')===0,'the author deletes their own comment and its photo');
+    ok((await boardSend('owner',{action:'deleteComment',commentId:otherComment.id})).status===200&&(await readBoard('board-red','red')).data.posts[0].comments.length===0,'an admin removes another player’s comment');
+    log=await adminLog();
+    ok(log.length===2&&log[0].action==='removeComment'&&log[0].team==='red'&&log[0].author===redId&&!JSON.stringify(log).includes('Agreed'),'comment removal is logged without its text');
+    // Paging: newest first, twenty at a time
+    for(let i=0;i<21;i++)await boardSend('board-black',{action:'createPost',team:'black',body:'Post '+i});
+    const firstPage=(await readBoard('board-black','black')).data,secondPage=(await readBoard('board-black','black',firstPage.next)).data;
+    const paged=[...firstPage.posts,...secondPage.posts].map(p=>p.body);
+    ok(firstPage.posts.length===20&&secondPage.posts.length===1&&secondPage.next===null&&new Set(paged).size===21&&firstPage.posts.every((p,i,all)=>!i||all[i-1].createdAt>=p.createdAt),'the feed pages twenty posts at a time, newest first');
+  }finally{await boards.dispose()}
+  // Board uploads are charged only after sign-in, team access and validation.
+  const boardTight=new Miniflare({...workerOptions,bindings:{...accessBindings,...budget({storage:1e9,classA:1,classB:1})}});
+  try{
+    await setUp(boardTight);await linkMember(boardTight,'Tight black','black','tight-black');
+    const used=async column=>(await (await boardTight.getD1Database('DB')).prepare(`SELECT coalesce(sum(${column}),0) AS n FROM r2_usage`).first('n'));
+    ok((await send(boardTight,'/api/board','owner',{action:'createPost',team:'red',body:'Bad file',images:new File([Buffer.from('not an image')],'x.png',{type:'image/png'})})).status===400,'invalid board photo rejected');
+    ok((await send(boardTight,'/api/board','tight-black',{action:'createPost',team:'red',body:'Wrong board',images:photoFile()})).status===403,'upload to another team’s board refused');
+    ok(await used('class_a')===0&&await storedObjects(boardTight)===0,'refused board uploads cost no R2 operation');
+    ok((await send(boardTight,'/api/board','owner',{action:'createPost',team:'red',body:'Fits',images:photoFile()})).status===200,'the one budgeted board upload still fits');
+    const key=(await (await boardTight.dispatchFetch(origin+'/api/board?team=red',{headers:await headers('owner')})).json()).posts[0].images[0];
+    ok((await boardTight.dispatchFetch(origin+'/api/board/image?key='+encodeURIComponent(key),{headers:await headers('tight-black')})).status===403&&await used('class_b')===0,'a refused board photo view costs no R2 operation');
+    ok((await boardTight.dispatchFetch(origin+'/api/board/image?key='+encodeURIComponent(key),{headers:await headers('owner')})).status===200,'the one budgeted board photo view still fits');
+  }finally{await boardTight.dispose()}
   // Data migrations upgrade a club saved before them.
   const oldClub=new Miniflare({...workerOptions,bindings:accessBindings});
   try{
