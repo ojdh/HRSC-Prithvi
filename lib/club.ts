@@ -10,9 +10,10 @@ export type Player = {id:string;name:string;team:Team;age:number|null;height:num
 export type Goal = {team:Team;scorer:string|null;assist:string|null;ownGoal:boolean};
 export type Round = {id:string;a:Team;b:Team;scoreA:number;scoreB:number;goals:Goal[];lineup:string[];exit:Team;winner:Team|null};
 export type Day = {id:string;date:string;roster:{id:string;team:Team}[];opening:[Team,Team];firstExit:Team;rounds:Round[];poll:'ready'|'open'|'closed';videoUrl?:string|null;videoKey?:string|null};
-export type Club = {adminId:string;players:Player[];days:Day[]};
-export type PublicClub = {invitation?:{name:string;team:Team};players:Player[];days:Day[];revision:number;initialized:boolean;isAdmin:boolean;me:string|null;polls:Record<string,{count:number;voted:boolean;tally:{candidate:string;votes:number}[]}>};
-export const emptyClub:PublicClub={players:[],days:[],revision:0,initialized:false,isAdmin:false,me:null,polls:{}};
+// adminId is the owner's account: the only person who can grant or remove admin rights. admins holds player ids.
+export type Club = {adminId:string;admins:string[];players:Player[];days:Day[]};
+export type PublicClub = {invitation?:{name:string;team:Team};players:Player[];days:Day[];revision:number;initialized:boolean;isAdmin:boolean;isOwner:boolean;owner:string|null;admins:string[];me:string|null;polls:Record<string,{count:number;voted:boolean;tally:{candidate:string;votes:number}[]}>};
+export const emptyClub:PublicClub={players:[],days:[],revision:0,initialized:false,isAdmin:false,isOwner:false,owner:null,admins:[],me:null,polls:{}};
 export function nextMatch(day:Day):{a:Team;b:Team;waiting:Team;incumbent:Team} {
   const last=day.rounds.at(-1);
   if(!last){const [a,b]=day.opening;return {a,b,waiting:TEAMS.find(t=>t!==a&&t!==b)!,incumbent:day.firstExit};}
