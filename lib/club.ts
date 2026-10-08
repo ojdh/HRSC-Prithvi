@@ -1,6 +1,6 @@
 export const TEAMS = ['red','black','white'] as const;
 export type Team = typeof TEAMS[number];
-export type TeamInfo = {name:string; color:string; letter:string; motto:string};
+export type TeamInfo = {name:string; color:string; letter:string; motto:string; photo?:string|null};
 export const DEFAULT_TEAMS: Record<Team,TeamInfo> = {
   red:{name:'Team Red',color:'#ff666b',letter:'R',motto:'Bring the fire.'},
   black:{name:'Team Black',color:'#171918',letter:'B',motto:'Own the moment.'},
