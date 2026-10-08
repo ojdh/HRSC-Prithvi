@@ -299,11 +299,12 @@ The placeholder check first used `grep REPLACE_WITH_ wrangler.jsonc`. That also 
 - Set `CLUB_SETUP_KEY` as a Worker secret. The only other copy is a private file for the organiser.
 - Checked the live site: the homepage returns 200 without sign-in; `/winterleague`, `/join` and `/api/*` redirect to the Access sign-in; the `workers.dev` address is disabled.
 - The account owner confirmed in the dashboard (Workers & Pages → Plans) that there is no paid Workers plan, so the account is on Workers Free.
+- Filled in `CF_ACCESS_GROUP_ID` in `wrangler.jsonc` with the Club members group ID, and pointed the Access policy at that group instead of a list of emails.
 
 **Still to do:**
 
 - [ ] The organiser signs in at `prithvifc.ca/winterleague`, enters the setup key, rebuilds the squads and sends invitations. Enter each player's email on their placeholder before inviting them; the invite adds it to the Club members rule group.
-- [ ] Set up Access sync: create the `CF_API_TOKEN` token, store it and `CF_ACCOUNT_ID` with `wrangler secret put`, and fill in `CF_ACCESS_GROUP_ID` in `wrangler.jsonc` (see Access sync on invite).
+- [ ] Set up Access sync: create the `CF_API_TOKEN` token and store it and `CF_ACCOUNT_ID` with `wrangler secret put` (see Access sync on invite).
 - [ ] Decide on the old data. The new site starts empty, so this is a fresh start unless old data is imported from ChatGPT Sites later. Importing would mean remapping player accounts and adding a ledger row for each imported file.
 - [ ] Shut down the ChatGPT Sites copy once players have moved over.
 - [ ] Separate from Cloudflare: the web app manifest, home-screen icons and service worker are referenced but not in the repo, so "Add to Home Screen" can't install yet.

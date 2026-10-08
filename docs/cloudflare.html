@@ -386,11 +386,12 @@ footer{color:var(--muted);font-size:.9rem;margin-top:48px;border-top:1px solid v
   <li class="ok">Set <code>CLUB_SETUP_KEY</code> as a Worker secret. The only other copy is a private file for the organiser.</li>
   <li class="ok">Checked the live site: the homepage returns 200 without sign-in; <code>/winterleague</code>, <code>/join</code> and <code>/api/*</code> redirect to the Access sign-in; the <code>workers.dev</code> address is disabled.</li>
   <li class="ok">The account owner confirmed in the dashboard (Workers &amp; Pages &rarr; Plans) that there is no paid Workers plan, so the account is on Workers Free.</li>
+  <li class="ok">Filled in <code>CF_ACCESS_GROUP_ID</code> in <code>wrangler.jsonc</code> with the Club members group ID, and pointed the Access policy at that group instead of a list of emails.</li>
 </ul>
 <p><strong>Still to do:</strong></p>
 <ul>
   <li class="todo">The organiser signs in at <code>prithvifc.ca/winterleague</code>, enters the setup key, rebuilds the squads and sends invitations. Enter each player's email on their placeholder before inviting them; the invite adds it to the Club members rule group.</li>
-  <li class="todo">Set up Access sync: create the <code>CF_API_TOKEN</code> token, store it and <code>CF_ACCOUNT_ID</code> with <code>wrangler secret put</code>, and fill in <code>CF_ACCESS_GROUP_ID</code> in <code>wrangler.jsonc</code> (see Access sync on invite).</li>
+  <li class="todo">Set up Access sync: create the <code>CF_API_TOKEN</code> token and store it and <code>CF_ACCOUNT_ID</code> with <code>wrangler secret put</code> (see Access sync on invite).</li>
   <li class="todo">Decide on the old data. The new site starts empty, so this is a fresh start unless old data is imported from ChatGPT Sites later. Importing would mean remapping player accounts and adding a ledger row for each imported file.</li>
   <li class="todo">Shut down the ChatGPT Sites copy once players have moved over.</li>
   <li class="todo">Separate from Cloudflare: the web app manifest, home-screen icons and service worker are referenced but not in the repo, so "Add to Home Screen" can't install yet.</li>
