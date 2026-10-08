@@ -43,6 +43,13 @@
       "when": 1791439729781,
       "tag": "0005_team_details",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1791440307446,
+      "tag": "0006_day_times",
+      "breakpoints": true
     }
   ]
 }

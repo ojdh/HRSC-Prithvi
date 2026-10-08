@@ -96,11 +96,17 @@ try{
   const legacy=await mf.dispatchFetch(origin+'/?view=vote&day=legacy',{redirect:'manual'});
   ok(legacy.status>=300&&legacy.status<400&&legacy.headers.get('location')==='/winterleague?view=vote&day=legacy','old voting links redirect to the league');
   const date='2026-09-06',roster=[owner.id,red.id,black.id,white.id];
-  const created=await success('createDay',{date,roster,a:'red',b:'black',firstExit:'red'});
-  const dayId=created.dayId;
+  const created=await success('addDays',{from:date,start:'07:00',end:'08:30'});
+  ok(created.dayIds.length===1&&!created.skipped.length,'one-off match day scheduled');
+  const dayId=created.dayIds[0];
+  const scheduled=(await get('black-user')).data.days[0];ok(scheduled.roster.length===0&&scheduled.opening===null&&scheduled.start==='07:00'&&scheduled.end==='08:30','scheduled day waits for attendance');
+  ok((await post('openPoll',{dayId})).status===400,'voting needs a set-up match day');
+  ok((await post('addRound',{dayId,scoreA:0,scoreB:0,lineup:roster,goals:[]})).status===400,'rounds need a set-up match day');
+  for(const bad of [{a:'red',b:'red'},{firstExit:'white'},{roster:[owner.id,red.id,black.id]}])ok((await post('setupDay',{dayId,roster,a:'red',b:'black',firstExit:'red',...bad})).status===400,'invalid matchday setup rejected: '+JSON.stringify(bad));
+  await success('setupDay',{dayId,roster,a:'red',b:'black',firstExit:'red'});
   await success('openPoll',{dayId});
   ok((await get()).data.days[0].rounds.length===0,'voting opens before any stats');
-  ok((await post('attendance',{dayId,roster:[...roster,absent.id]})).status===400,'vote eligibility roster locked');
+  ok((await post('setupDay',{dayId,roster:[...roster,absent.id],a:'red',b:'black',firstExit:'red'})).status===400,'vote eligibility roster locked');
   ok((await post('vote',{dayId,candidate:red.id})).status===400,'own-team ballot blocked');
   ok((await post('vote',{dayId,candidate:white.id},'absent-user')).status===403,'absent player cannot vote');
   ok((await post('vote',{dayId,candidate:absent.id},'black-user')).status===400,'absent candidate blocked');
@@ -179,6 +185,36 @@ try{
   const afterTeams=(await get('black-user')).data;
   ok(JSON.stringify(afterTeams.teams.black)===JSON.stringify({name:'Tigers',color:'#1f7a4d',letter:'T',motto:'Hunt as one.'}),'team details saved and normalised');
   ok(afterTeams.teams.red.name==='Team Red'&&JSON.stringify(afterTeams.days)===JSON.stringify(beforeTeams.days)&&afterTeams.players.find(p=>p.id===black.id).team==='black','renaming keeps rosters, rounds and assignments');
+  // Scheduling: weekly series and one-off days, each with a time; set up on the day.
+  const slot={start:'18:00',end:'19:30'};
+  const series=await success('addDays',{from:'2026-09-13',to:'2026-11-29',...slot});
+  const seriesDays=(await get()).data.days.filter(d=>series.dayIds.includes(d.id)).sort((x,y)=>x.date.localeCompare(y.date));
+  ok(series.dayIds.length===12&&seriesDays.every((d,i)=>d.start==='18:00'&&d.end==='19:30'&&(!i||Date.parse(d.date)-Date.parse(seriesDays[i-1].date)===7*864e5)),'weekly series repeats at the same time');
+  const wednesday=(await success('addDays',{from:'2026-09-16',...slot})).dayIds[0];
+  const overlap=await success('addDays',{from:'2026-09-09',to:'2026-09-23',start:'07:00',end:'08:30'});
+  ok(overlap.dayIds.length===2&&JSON.stringify(overlap.skipped)===JSON.stringify(['2026-09-16']),'series skips dates that already have a match day');
+  for(const bad of [{from:'2026-09-01',to:'2027-09-07'},{from:'2026-12-01',start:'08:30',end:'08:30'},{from:'2026-02-30'},{from:'2026-08-30'},{from:'2026-12-08',to:'2026-12-01'},{from:'2026-09-16'}])ok((await post('addDays',{...slot,...bad})).status===400,'invalid schedule rejected: '+JSON.stringify(bad));
+  ok((await post('addDays',{from:'2026-12-08',...slot},'black-user')).status===403,'players cannot schedule match days');
+  ok((await post('editDay',{dayId:wednesday,date:'2026-09-13',...slot})).status===400,'edited date cannot clash');
+  await success('editDay',{dayId:wednesday,date:'2026-09-17',start:'19:00',end:'20:00'});
+  const moved=(await get()).data.days.find(d=>d.id===wednesday);ok(moved.date==='2026-09-17'&&moved.start==='19:00'&&moved.end==='20:00','match day moved to a new date and time');
+  ok((await post('editDay',{dayId,date:'2026-09-06',...slot})).status===400,'played match days cannot be moved');
+  ok((await post('deleteDay',{dayId},'black-user')).status===403,'players cannot cancel match days');
+  ok((await post('deleteDay',{dayId})).status===400,'played match days cannot be cancelled');
+  await success('deleteDay',{dayId:wednesday});
+  ok(!(await get()).data.days.some(d=>d.id===wednesday),'scheduled match day cancelled');
+  ok((await videoUpload('owner',{target:'matchday',dayId:series.dayIds[0]})).status===200,'clip added to a scheduled day');
+  ok((await post('deleteDay',{dayId:series.dayIds[0]})).status===400,'match day with a clip cannot be cancelled');
+  // Each round can carry its own replay link.
+  const rounds=(await get()).data.days.find(d=>d.id===dayId).rounds;
+  await success('setRoundVideo',{dayId,roundId:rounds[1].id,videoUrl:'https://www.youtube.com/watch?v=dQw4w9WgXcQ'});
+  const withLink=(await get('black-user')).data.days.find(d=>d.id===dayId).rounds;
+  ok(withLink[1].videoUrl==='https://www.youtube.com/watch?v=dQw4w9WgXcQ'&&!withLink[0].videoUrl&&!withLink[2].videoUrl,'round link saved on that round only');
+  ok((await post('setRoundVideo',{dayId,roundId:rounds[1].id,videoUrl:'https://evil.test/v'})).status===400,'round link must be a video host');
+  ok((await post('setRoundVideo',{dayId,roundId:rounds[1].id,videoUrl:''},'black-user')).status===403,'players cannot edit round links');
+  ok((await post('setRoundVideo',{dayId,roundId:'missing',videoUrl:''})).status===400,'unknown round rejected');
+  await success('setRoundVideo',{dayId,roundId:rounds[1].id,videoUrl:''});
+  ok(!(await get()).data.days.find(d=>d.id===dayId).rounds[1].videoUrl,'round link cleared');
   const stale=state.revision;
   ok((await post('editPlayer',{...fields,...red,name:'Wrong overwrite'},'owner',stale)).status===409,'stale updates rejected');
   state=(await get()).data;ok(!JSON.stringify(state).includes('userId')&&!JSON.stringify(state).includes('inviteHash'),'private identity and invitation hashes not disclosed');
@@ -191,6 +227,7 @@ try{
   ok(photoRes.status===200&&photoRes.headers.get('content-type')==='image/png','stored photo served');
   ok((await mf.dispatchFetch(origin+'/api/photo?key='+encodeURIComponent(photo))).status===401,'photo needs sign-in');
   const ts=require('typescript');const source=await readFile('lib/club.ts','utf8');const js=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ES2022,target:ts.ScriptTarget.ES2022}}).outputText;const model=await import('data:text/javascript;base64,'+Buffer.from(js).toString('base64'));
+  ok(model.embedVideo('https://youtu.be/dQw4w9WgXcQ')==='https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ'&&!model.isVideoUrl('http://youtube.com/x')&&model.isVideoUrl('https://vimeo.com/1')&&model.weeklyDates('2026-09-13','2026-11-29').length===12,'video links and weekly dates');
   ok(model.teamInk('#171918')==='#fffef9'&&model.teamInk('#eceddf')==='#173322'&&model.teamInk('#ff666b')==='#173322','crest text picks the more legible ink');
   const t=model.teamStats(state.days),p=model.playerStats(state.players,state.days);
   ok(t.find(x=>x.team==='red').wins===1&&t.find(x=>x.team==='black').wins===1,'team wins derived correctly');
@@ -234,13 +271,14 @@ try{
   const oldClub=new Miniflare({...workerOptions,bindings:accessBindings});
   try{
     await migrate(oldClub,f=>f<'0004');
-    await (await oldClub.getD1Database('DB')).prepare('INSERT INTO club (id,revision,data) VALUES (1,0,?)').bind(JSON.stringify({adminId:'owner',players:[{id:'legacy-owner',name:'Organiser',team:'red',userId:'owner',age:null,height:null,district:null,position:'All-rounder',photo:null}],days:[]})).run();
+    await (await oldClub.getD1Database('DB')).prepare('INSERT INTO club (id,revision,data) VALUES (1,0,?)').bind(JSON.stringify({adminId:'owner',players:[{id:'legacy-owner',name:'Organiser',team:'red',userId:'owner',age:null,height:null,district:null,position:'All-rounder',photo:null}],days:[{id:'legacy-day',date:'2026-09-06',roster:[{id:'legacy-owner',team:'red'}],opening:['red','black'],firstExit:'red',rounds:[],poll:'ready'}]})).run();
     await migrate(oldClub,f=>f>='0004');
     const view=await (await oldClub.dispatchFetch(origin+'/api/club',{headers:await headers('owner')})).json();
     ok(view.isOwner&&view.isAdmin&&view.owner==='legacy-owner'&&Array.isArray(view.admins)&&view.admins.length===0,'oldClub club gains an empty admin list');
     const added=await oldClub.dispatchFetch(origin+'/api/club',{method:'POST',headers:await headers('owner'),body:JSON.stringify({action:'addPlayer',revision:view.revision,...fields,name:'New signing',team:'black'})});
     ok(added.status===200,'owner keeps admin rights after migration');
     ok(JSON.stringify(view.teams)===JSON.stringify(model.DEFAULT_TEAMS),'legacy club gains the default team details');
+    ok(view.days[0].start==='07:00'&&view.days[0].end==='08:30'&&model.isReady(view.days[0]),'legacy match days keep their 7:00–8:30 slot and setup');
   }finally{await oldClub.dispose()}
   console.log(JSON.stringify({passed:checks,productionDataTouched:false}));
 }finally{await mf.dispose()}

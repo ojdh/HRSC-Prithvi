@@ -1,6 +1,6 @@
 # Prithvi FC · Club website & Winter league
 
-A mobile-friendly club portal for Red, Black and White. Matchdays run weekly from 7:00–8:30 AM. Voting and results entry are independent: open the vote immediately after the session and enter results later.
+A mobile-friendly club portal for Red, Black and White. Admins schedule matchdays as a weekly series (one weekday, start and end time, up to 52 weeks) or as one-off days at any date and time; the usual session is 7:00–8:30 AM. A scheduled day has no attendance until it is set up on the day with the attending players and opening teams, and it can be moved or cancelled until voting opens or a round is recorded. Each round can carry its own YouTube, Vimeo or Google Drive link alongside the full-match link. Voting and results entry are independent: open the vote immediately after the session and enter results later.
 
 ## Organiser onboarding
 
