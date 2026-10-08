@@ -254,6 +254,15 @@ try{
   ok(regular.attended===1&&regular.attendance===50,'attendance counts played matchdays only');
   const squad=[{id:'r1',team:'red'},{id:'w1',team:'white'}];
   ok(JSON.stringify(model.teamsWithout(squad.map(p=>p.id),squad))==='["black"]'&&JSON.stringify(model.teamsWithout(['r1'],squad))==='["black","white"]'&&model.teamsWithout(['r1','w1','b1'],[...squad,{id:'b1',team:'black'}]).length===0,'matchday setup names the teams with nobody attending');
+  // League table: 3 points a win, 1 a draw; GF, GA and GD add up over every game played.
+  const game=(a,b,scoreA,scoreB)=>({id:a+b+scoreA+scoreB,a,b,scoreA,scoreB,goals:[],lineup:[],exit:a,winner:scoreA===scoreB?null:scoreA>scoreB?a:b});
+  const table=model.teamStats([{...played('t1',[]),rounds:[game('red','black',1,0),game('black','white',0,0),game('white','black',0,0),game('black','red',0,0),game('red','white',0,3)]}]);
+  const pts=Object.fromEntries(table.map(s=>[s.team,s]));
+  ok(pts.red.points===4&&pts.black.points===3&&pts.white.points===5,'points are 3 per win and 1 per draw');
+  ok(table[0].team==='white'&&pts.black.wins===0&&table[1].team==='red','table is ranked by points first');
+  function balanced(stats,days){const rounds=days.flatMap(d=>d.rounds);return stats.every(s=>{const mine=rounds.filter(r=>r.a===s.team||r.b===s.team);return s.played===mine.length&&s.wins+s.draws+s.losses===s.played&&s.gf===mine.reduce((n,r)=>n+(r.a===s.team?r.scoreA:r.scoreB),0)&&s.ga===mine.reduce((n,r)=>n+(r.a===s.team?r.scoreB:r.scoreA),0)&&s.gd===s.gf-s.ga&&s.points===3*s.wins+s.draws})&&stats.reduce((n,s)=>n+s.gf,0)===stats.reduce((n,s)=>n+s.ga,0)&&stats.reduce((n,s)=>n+s.gd,0)===0;}
+  ok(balanced(table,[{rounds:[game('red','black',1,0),game('black','white',0,0),game('white','black',0,0),game('black','red',0,0),game('red','white',0,3)]}]),'GF, GA, GD and results add up on a mixed session');
+  ok(balanced(model.teamStats(state.days),state.days),'GF, GA, GD and results add up over the whole season');
   // Live gameday drafts: score derives from the goals list; the 10-minute clock pauses and resumes.
   const draft={...model.freshDraft(['p1','p2']),goals:[{team:'red',scorer:'p1',assist:null,ownGoal:false},{team:'black',scorer:'p1',assist:null,ownGoal:true},{team:'red',scorer:null,assist:null,ownGoal:false}]};
   const payload=model.roundPayload(draft,'red','black');
