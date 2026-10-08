@@ -124,9 +124,36 @@ The first draft put Access in front of the whole site. That would have hidden th
 <details>
 <summary>Why a member list instead of "Everyone"</summary>
 
-A seat is taken the first time a person signs in, and it stays taken. With "Everyone", any stranger could request a code and sign in, using up seats the app would never let them use. Strangers could fill all 50 and lock out real players. A members list means only club members ever take a seat. Free seats by removing departed players on the Users page. The cost is that the organiser adds a player's email to the group when inviting them.
+A seat is taken the first time a person signs in, and it stays taken. With "Everyone", any stranger could request a code and sign in, using up seats the app would never let them use. Strangers could fill all 50 and lock out real players. A members list means only club members ever take a seat. Free seats by removing departed players on the Users page. The app adds a player's email to the group when an admin invites them (see Access sync on invite below).
 
 </details>
+
+#### Access sync on invite
+
+**Why:** before this, the organiser had to add each new player's email to the Club members rule group by hand before sending the invite. Now the app does it, but only when an admin invites a player.
+
+**How it works** (`lib/access-sync.ts`, called from `app/api/club/route.ts`):
+
+- An admin creates a placeholder player and enters that person's email on it. Only admins can set or see emails, and only on players who haven't accepted an invitation yet. Each email is lower-cased and can belong to one player.
+- **Invite:** when an admin invites a player who has an email, the app reads the Club members group, adds an Emails rule for that address, and writes the group back. Every other rule in the group (the owner's and admins' emails, anything added by hand) is kept as it was. The app then records the address as the player's `accessEmail`. Inviting again doesn't add a duplicate. Invites for players without an email work as before and never call Cloudflare.
+- **Changing the email** of an invited player who hasn't joined yet swaps the old address for the new one in the group.
+- **Removing (archiving) a player** takes their `accessEmail` out of the group.
+- **Emails added by hand stay put.** If an invited player's email is already in the group, the app leaves it unmanaged and never removes it.
+- **50-seat cap:** the app refuses an invite that would put more than 50 emails in the group, because the Zero Trust Free plan has 50 seats. Free one by removing a departed member from the group and from the Users page.
+- **Failures:** if the Cloudflare call fails, nothing is saved and the admin sees an error. If the club save fails after the group was changed (someone else saved first), the app puts the group back. If `CF_ACCOUNT_ID`, `CF_ACCESS_GROUP_ID` or `CF_API_TOKEN` is missing, inviting a player who has an email fails with "Access sync isn't configured".
+- **Logs** record only the HTTP status and email counts, never the token or any email.
+
+**Cloudflare API calls** ([Access groups API](https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/groups/methods/update/)): `GET` then `PUT` on `https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/access/groups/{CF_ACCESS_GROUP_ID}` with `Authorization: Bearer <CF_API_TOKEN>`. The PUT body is the group's `name`, `include`, `exclude`, `require` and `is_default`; an email rule is `{"email": {"email": "player@example.com"}}`.
+
+**Setting it up (account owner, once):**
+
+1. **Create the API token.** In the Cloudflare dashboard go to My Profile → API Tokens → Create Token → Custom token. Give it one permission, **Account → Access: Organizations, Identity Providers, and Groups → Edit**, and under Account Resources include **only this club's account**. Don't add any other permission.
+2. **Store it as a Worker secret:** `npx wrangler secret put CF_API_TOKEN`, then paste the token. It is never written to the repo or to GitHub.
+3. **Find the account ID:** it's shown as "Account ID" on the account's Workers & Pages overview in the dashboard. Put it in `wrangler.jsonc` as `CF_ACCOUNT_ID`.
+4. **Find the Club members group ID:** list the account's Access groups with the new token and copy the `id` of the "Club members" group: `curl -s -H "Authorization: Bearer $CF_API_TOKEN" https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/access/groups`. Put it in `wrangler.jsonc` as `CF_ACCESS_GROUP_ID`.
+5. Deploy. The Deploy workflow refuses to run while either value is still a `REPLACE_WITH_` placeholder.
+
+Keep the Access policy's Allow rule pointed at the Club members group only, never "Everyone". The app adds only invited emails to that group, so only invited people can take a seat.
 
 ### 4. The website itself: a Cloudflare Worker
 
@@ -137,7 +164,7 @@ A seat is taken the first time a person signs in, and it stays taken. With "Ever
 - **Worker name:** `hrsc-prithvi`, built by `pnpm build` into `dist/`.
 - **Address:** `routes: [{ pattern: "prithvifc.ca", custom_domain: true }]`. The deploy attaches the domain and creates its DNS record, so there's no clicking around in the dashboard.
 - **No second address:** `workers_dev: false` turns off the extra `*.workers.dev` address, so the site lives at exactly one URL.
-- **Settings and secrets:** the database ID, Access team URL, AUD tag and R2 limits are plain `vars`, not secrets. The one secret, `CLUB_SETUP_KEY`, is set separately with `wrangler secret put` and never stored in the repo.
+- **Settings and secrets:** the database ID, Access team URL, AUD tag and R2 limits are plain `vars`, not secrets. The account ID and Club members group ID for Access sync are `vars` too. The two secrets, `CLUB_SETUP_KEY` and `CF_API_TOKEN`, are set separately with `wrangler secret put` and never stored in the repo.
 
 **Plan:** Workers Free allows 100,000 requests a day. Past that, requests are refused rather than billed. On 2 October 2026 the account owner checked Workers & Pages → Plans in the dashboard and confirmed there is no paid Workers plan, so the account is on Workers Free. This was a dashboard check, not an API check.
 
@@ -255,9 +282,11 @@ The placeholder check first used `grep REPLACE_WITH_ wrangler.jsonc`. That also 
 
 | Value | Secret? | Where it lives |
 |---|---|---|
-| Cloudflare API token | Yes | GitHub repo secret only |
+| Cloudflare API token (deploys) | Yes | GitHub repo secret only |
+| `CF_API_TOKEN` (Access sync, Access groups edit only) | Yes | Worker secret only |
 | `CLUB_SETUP_KEY` | Yes | Worker secret, plus a private file for the organiser |
-| Account ID | Not strictly, but not published | GitHub repo secret |
+| Account ID | Not strictly | GitHub repo secret, and `CF_ACCOUNT_ID` in `wrangler.jsonc` for Access sync |
+| Club members Access group ID | No | `CF_ACCESS_GROUP_ID` in `wrangler.jsonc` |
 | D1 database ID, Access team URL, AUD tag, R2 limits | No | `wrangler.jsonc` (they identify resources and grant no access) |
 
 ### 11. Done and still to do
@@ -272,7 +301,8 @@ The placeholder check first used `grep REPLACE_WITH_ wrangler.jsonc`. That also 
 
 **Still to do:**
 
-- [ ] The organiser signs in at `prithvifc.ca/winterleague`, enters the setup key, rebuilds the squads and sends invitations. Each player's email must be in the Club members rule group first.
+- [ ] The organiser signs in at `prithvifc.ca/winterleague`, enters the setup key, rebuilds the squads and sends invitations. Enter each player's email on their placeholder before inviting them; the invite adds it to the Club members rule group.
+- [ ] Set up Access sync: create the `CF_API_TOKEN` token, store it with `wrangler secret put`, and fill in `CF_ACCOUNT_ID` and `CF_ACCESS_GROUP_ID` (see Access sync on invite).
 - [ ] Decide on the old data. The new site starts empty, so this is a fresh start unless old data is imported from ChatGPT Sites later. Importing would mean remapping player accounts and adding a ledger row for each imported file.
 - [ ] Shut down the ChatGPT Sites copy once players have moved over.
 - [ ] Separate from Cloudflare: the web app manifest, home-screen icons and service worker are referenced but not in the repo, so "Add to Home Screen" can't install yet.

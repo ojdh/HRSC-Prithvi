@@ -7,5 +7,8 @@ declare namespace Cloudflare {
     R2_STORAGE_QUOTA_BYTES?: string;
     R2_CLASS_A_MONTHLY_LIMIT?: string;
     R2_CLASS_B_MONTHLY_LIMIT?: string;
+    CF_ACCOUNT_ID?: string;
+    CF_ACCESS_GROUP_ID?: string;
+    CF_API_TOKEN?: string;
   }
 }
