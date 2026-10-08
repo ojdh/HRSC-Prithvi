@@ -1,15 +1,10 @@
 import vinext from "vinext";
 import { defineConfig } from "vite";
-import { readExecutionProfile } from "./scripts/execution-profile.mjs";
 import { accessDev } from "./build/access-dev-plugin";
 
 const DEV_PORT = 5173;
 // In dev the Vite server itself plays the Access team (see access-dev-plugin).
 const devAccess = { teamUrl: `http://localhost:${DEV_PORT}`, audience: "local-dev" };
-
-// macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
-const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
-const managedLinux = readExecutionProfile() === "managed-linux";
 
 export default defineConfig(async ({ command }) => {
   // Use Miniflare's local Request.cf placeholder unless fetching is requested.
@@ -30,8 +25,6 @@ export default defineConfig(async ({ command }) => {
     server: {
       port: DEV_PORT,
       strictPort: true,
-      ...(managedLinux ? { host: "0.0.0.0", allowedHosts: ["terminal.local"] } : {}),
-      ...(isCodexSeatbeltSandbox ? { watch: { useFsEvents: false, usePolling: true } } : {}),
     },
     plugins: [
       vinext(),

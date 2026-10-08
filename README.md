@@ -22,7 +22,7 @@ Cloudflare D1 stores the club document with optimistic concurrency and separate 
 
 ## Validation
 
-Run `pnpm build`, then `node --import ./scripts/sites-env.mjs tests/club-integration.mjs` for isolated Worker, D1, R2 and Access-token integration checks. The test creates no production records. Typecheck with `node node_modules/typescript/bin/tsc --noEmit`.
+Run `pnpm build`, then `node tests/club-integration.mjs` for isolated Worker, D1, R2 and Access-token integration checks. The test creates no production records. Typecheck with `node node_modules/typescript/bin/tsc --noEmit`.
 
 ## Sign-in
 

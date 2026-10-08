@@ -22,7 +22,7 @@ jobs:
       - run: node node_modules/typescript/bin/tsc --noEmit
       - run: node --test tests/r2-boundary.mjs
       - run: pnpm build
-      - run: node --import ./scripts/sites-env.mjs tests/club-integration.mjs
+      - run: node tests/club-integration.mjs
 
   deploy:
     needs: verify
