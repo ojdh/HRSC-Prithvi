@@ -11,3 +11,10 @@ export const r2Usage = sqliteTable('r2_usage',{month:text('month').primaryKey(),
 export const accessSyncLock = sqliteTable('access_sync_lock',{id:integer('id').primaryKey(),token:text('token').notNull(),expires:integer('expires').notNull()});
 // created_at is unix seconds; rows stored before migration 0007 have none and count as old.
 export const r2Objects = sqliteTable('r2_objects',{key:text('key').primaryKey(),bytes:integer('bytes').notNull(),createdAt:integer('created_at')});
+// Team discussion boards. Authors are player ids and created_at is unix milliseconds. Board text never goes in the club JSON.
+export const boardPosts = sqliteTable('board_posts',{id:text('id').primaryKey(),team:text('team').notNull(),author:text('author').notNull(),body:text('body').notNull(),createdAt:integer('created_at').notNull()},t=>[index('idx_board_posts_team').on(t.team,t.createdAt)]);
+export const boardComments = sqliteTable('board_comments',{id:text('id').primaryKey(),postId:text('post_id').notNull(),author:text('author').notNull(),body:text('body').notNull(),createdAt:integer('created_at').notNull()},t=>[index('idx_board_comments_post').on(t.postId)]);
+// target_id is a post id or a comment id.
+export const boardReactions = sqliteTable('board_reactions',{targetId:text('target_id').notNull(),player:text('player').notNull(),emoji:text('emoji').notNull()},t=>[primaryKey({columns:[t.targetId,t.player,t.emoji]})]);
+// Every R2 object a board post or comment holds; cleanupStorage counts these keys as referenced.
+export const boardImages = sqliteTable('board_images',{key:text('key').primaryKey(),team:text('team').notNull(),postId:text('post_id').notNull(),commentId:text('comment_id'),createdAt:integer('created_at').notNull()},t=>[index('idx_board_images_post').on(t.postId)]);

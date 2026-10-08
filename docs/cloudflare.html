@@ -118,8 +118,8 @@ footer{color:var(--muted);font-size:.9rem;margin-top:48px;border-top:1px solid v
   <div class="card"><h3>Cloudflare is the building</h3><p>We used to rent a room in someone else's building (ChatGPT Sites). Now the club has its own building with its own street address, <code>prithvifc.ca</code>, and we hold the keys.</p></div>
   <div class="card"><h3>The front lobby is open</h3><p>Anyone can walk into the lobby, which is the homepage, and see what the club is about.</p></div>
   <div class="card"><h3>Access is the doorman</h3><p>To go past the lobby into the league rooms, the doorman checks your name against a guest list (the "Club members" group). If you're on it, he emails you a one-time code. You type it in and you're in. You don't need to remember a password.</p></div>
-  <div class="card"><h3>D1 is the filing cabinet</h3><p>It holds the roster, match results and votes.</p></div>
-  <div class="card"><h3>R2 is the storage locker with a meter</h3><p>Photos and video clips go here. The locker is free up to a point. Past that, it starts charging.</p></div>
+  <div class="card"><h3>D1 is the filing cabinet</h3><p>It holds the roster, match results, votes and team board posts.</p></div>
+  <div class="card"><h3>R2 is the storage locker with a meter</h3><p>Photos (profile, team and team board photos) and video clips go here. The locker is free up to a point. Past that, it starts charging.</p></div>
   <div class="card"><h3>The guardrail stops the meter</h3><p>Before anything goes into or comes out of the locker, the website checks a tally. If the next item would go over the free amount, it says "not this month" instead. Nobody gets a surprise bill.</p></div>
 </div>
 
@@ -257,7 +257,7 @@ footer{color:var(--muted);font-size:.9rem;margin-top:48px;border-top:1px solid v
 <p><code>prithvifc.ca</code> is a zone on the club's Cloudflare account. It's on the Free plan, uses Cloudflare's nameservers, and its status is active (checked through the Cloudflare API). The domain needs to be on the same account so the Worker can claim it as a custom domain and Access can protect paths on it.</p>
 
 <h3 id="detail-d1">6. The database: D1</h3>
-<p><strong>Why:</strong> the app stores the club as one JSON document, plus separate tables for vote receipts, anonymous ballots, maintenance records and the R2 ledger. D1 is Cloudflare's SQLite database and the app already used it.</p>
+<p><strong>Why:</strong> the app stores the club as one JSON document, plus separate tables for vote receipts, anonymous ballots, maintenance records, the R2 ledger and the team boards (posts, comments, reactions and photo records, migration <code>0010</code>). D1 is Cloudflare's SQLite database and the app already used it.</p>
 <p><strong>How:</strong></p>
 <ul>
   <li>Created with <code>wrangler d1 create hrsc-prithvi</code> in Western North America.</li>
@@ -272,7 +272,7 @@ footer{color:var(--muted);font-size:.9rem;margin-top:48px;border-top:1px solid v
   <li><strong><code>putObject</code></strong> (photo or clip upload): adds one Class A operation to this month's count in D1 and reserves the file's bytes in a ledger, then uploads. If either would go past its limit, the upload is refused.</li>
   <li><strong><code>getObject</code></strong> (showing a photo, or one video chunk of up to 1 MB): adds one Class B operation first.</li>
   <li><strong><code>deleteObject</code></strong>: deleting is free in R2. The ledger row is removed only after R2 confirms the delete, so a failed delete keeps being counted. Over-counting is the safe side, and the daily clean-up retries the delete.</li>
-  <li><strong><code>cleanupStorage</code></strong> (the daily Cron Trigger): deletes every object in the ledger that the club no longer references, such as one whose delete failed or one left behind when an upload stored a file but the save after it failed. References are player photos, player highlights, team photos and matchday clips. Objects stored in the last hour are left alone, since their upload may still be saving. It works from the ledger (<code>r2_objects</code>, whose <code>created_at</code> column comes from migration <code>0007</code>), so it makes no R2 list call, and deletes are free. It logs counts only.</li>
+  <li><strong><code>cleanupStorage</code></strong> (the daily Cron Trigger): deletes every object in the ledger that the club no longer references, such as one whose delete failed or one left behind when an upload stored a file but the save after it failed. References are player photos, player highlights, team photos, matchday clips and team board photos (every key in the <code>board_images</code> table). Objects stored in the last hour are left alone, since their upload may still be saving. It works from the ledger (<code>r2_objects</code>, whose <code>created_at</code> column comes from migration <code>0007</code>), so it makes no R2 list call, and deletes are free. It logs counts only.</li>
   <li><strong>Checks come first:</strong> the file is validated and the user's sign-in and permissions are checked before anything is charged. A bad upload or a stranger costs nothing.</li>
   <li><strong>Missing limits:</strong> every upload and view is refused (fails closed).</li>
 </ul>

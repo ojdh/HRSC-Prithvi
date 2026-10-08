@@ -71,6 +71,13 @@
       "when": 1791447549629,
       "tag": "0009_access_sync_lock",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1791494721555,
+      "tag": "0010_team_boards",
+      "breakpoints": true
     }
   ]
 }

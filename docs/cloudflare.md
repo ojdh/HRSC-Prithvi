@@ -36,8 +36,8 @@ Think of the website as the club's **clubhouse**.
 - **Cloudflare is the building.** We used to rent a room in someone else's building (ChatGPT Sites). Now the club has its own building with its own street address, `prithvifc.ca`, and we hold the keys.
 - **The front lobby is open.** Anyone can walk into the lobby, which is the homepage, and see what the club is about.
 - **Access is the doorman.** To go past the lobby into the league rooms, the doorman checks your name against a guest list (the "Club members" group). If you're on it, he emails you a one-time code. You type it in and you're in. You don't need to remember a password.
-- **D1 is the filing cabinet.** It holds the roster, match results and votes.
-- **R2 is the storage locker with a meter.** Photos and video clips go here. The locker is free up to a point. Past that, it starts charging.
+- **D1 is the filing cabinet.** It holds the roster, match results, votes and team board posts.
+- **R2 is the storage locker with a meter.** Photos (profile, team and team board photos) and video clips go here. The locker is free up to a point. Past that, it starts charging.
 - **The guardrail stops the meter.** Before anything goes into or comes out of the locker, the website checks a tally. If the next item would go over the free amount, it says "not this month" instead. Nobody gets a surprise bill.
 
 Why move at all? In the old building, the receptionist trusted anyone wearing a badge with the right name on it. Outside that building, anyone can print a badge. The new doorman checks a signed pass that can't be faked.
@@ -176,7 +176,7 @@ Keep the Access policy's Allow rule pointed at the Club members group only, neve
 
 ### 6. The database: D1
 
-**Why:** the app stores the club as one JSON document, plus separate tables for vote receipts, anonymous ballots, maintenance records and the R2 ledger. D1 is Cloudflare's SQLite database and the app already used it.
+**Why:** the app stores the club as one JSON document, plus separate tables for vote receipts, anonymous ballots, maintenance records, the R2 ledger and the team boards (posts, comments, reactions and photo records, migration `0010`). D1 is Cloudflare's SQLite database and the app already used it.
 
 **How:**
 
@@ -193,7 +193,7 @@ Keep the Access policy's Allow rule pointed at the Club members group only, neve
 - **`putObject`** (photo or clip upload): adds one Class A operation to this month's count in D1 and reserves the file's bytes in a ledger, then uploads. If either would go past its limit, the upload is refused.
 - **`getObject`** (showing a photo, or one video chunk of up to 1 MB): adds one Class B operation first.
 - **`deleteObject`**: deleting is free in R2. The ledger row is removed only after R2 confirms the delete, so a failed delete keeps being counted. Over-counting is the safe side, and the daily clean-up retries the delete.
-- **`cleanupStorage`** (the daily Cron Trigger): deletes every object in the ledger that the club no longer references, such as one whose delete failed or one left behind when an upload stored a file but the save after it failed. References are player photos, player highlights, team photos and matchday clips. Objects stored in the last hour are left alone, since their upload may still be saving. It works from the ledger (`r2_objects`, whose `created_at` column comes from migration `0007`), so it makes no R2 list call, and deletes are free. It logs counts only.
+- **`cleanupStorage`** (the daily Cron Trigger): deletes every object in the ledger that the club no longer references, such as one whose delete failed or one left behind when an upload stored a file but the save after it failed. References are player photos, player highlights, team photos, matchday clips and team board photos (every key in the `board_images` table). Objects stored in the last hour are left alone, since their upload may still be saving. It works from the ledger (`r2_objects`, whose `created_at` column comes from migration `0007`), so it makes no R2 list call, and deletes are free. It logs counts only.
 - **Checks come first:** the file is validated and the user's sign-in and permissions are checked before anything is charged. A bad upload or a stranger costs nothing.
 - **Missing limits:** every upload and view is refused (fails closed).
 
