@@ -1,8 +1,9 @@
 // Runs against an isolated Worker/D1/R2 emulator. Never touches the hosted club.
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
-import {readFile,readdir} from 'node:fs/promises';
-import {resolve} from 'node:path';
+import {mkdtemp,readFile,readdir,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join,resolve} from 'node:path';
 const require=createRequire(import.meta.url);
 const workerRequire=createRequire(require.resolve('wrangler/package.json'));
 const {Miniflare}=workerRequire('miniflare');
@@ -252,6 +253,12 @@ try{
   const played=(id,roster)=>({id,date:'2026-09-06',start:'07:00',end:'08:30',roster,opening:['red','black'],firstExit:'red',poll:'ready',rounds:[{id:'r',a:'red',b:'black',scoreA:0,scoreB:0,goals:[],lineup:[],exit:'red',winner:null}]});
   const [regular]=model.playerStats([{id:'p',name:'P',team:'red'}],[played('d1',[{id:'p',team:'red'}]),played('d2',[]),{...played('d3',[{id:'p',team:'red'}]),rounds:[]}]);
   ok(regular.attended===1&&regular.attendance===50,'attendance counts played matchdays only');
+  // Past matchdays archive: played days before today, newest first.
+  const onDate=(id,date,rounds=1)=>({...played(id,[]),date,rounds:played(id,[]).rounds.slice(0,rounds)});
+  const archive=model.pastMatchdays([onDate('sep06','2026-09-06'),onDate('sep20','2026-09-20'),onDate('sep13','2026-09-13'),onDate('today','2026-10-08'),onDate('future','2026-10-15')],'2026-10-08').map(d=>d.id);
+  ok(JSON.stringify(archive)==='["sep20","sep13","sep06"]','past matchdays list days before today, newest first');
+  ok(model.pastMatchdays([onDate('empty','2026-09-06',0)],'2026-10-08').length===0,'past matchdays skip days with no rounds');
+  ok(JSON.stringify(model.awardWinners([{candidate:'a',votes:3},{candidate:'b',votes:3},{candidate:'c',votes:1}]).map(w=>w.candidate))==='["a","b"]'&&model.awardWinners([]).length===0,'player of the day is everyone tied on the most votes');
   const squad=[{id:'r1',team:'red'},{id:'w1',team:'white'}];
   ok(JSON.stringify(model.teamsWithout(squad.map(p=>p.id),squad))==='["black"]'&&JSON.stringify(model.teamsWithout(['r1'],squad))==='["black","white"]'&&model.teamsWithout(['r1','w1','b1'],[...squad,{id:'b1',team:'black'}]).length===0,'matchday setup names the teams with nobody attending');
   // League table: 3 points a win, 1 a draw; GF, GA and GD add up over every game played.
@@ -386,6 +393,47 @@ try{
     ok((await send(unbudgeted,'/api/photo','owner',{photo:photoFile()})).status===503,'missing R2 budget configuration fails closed');
     ok(await storedObjects(unbudgeted)===0,'unbudgeted upload stores nothing');
   }finally{await unbudgeted.dispose()}
+  // Daily storage clean-up: the cron removes R2 objects nothing references, keeps
+  // referenced and freshly uploaded ones, and retries a delete that failed.
+  const storageDir=await mkdtemp(join(tmpdir(),'hrsc-cleanup-'));
+  const janitorOptions={...workerOptions,bindings:{...accessBindings,...budget({storage:1e9,classA:1e6,classB:1e7})},d1Persist:join(storageDir,'d1'),r2Persist:join(storageDir,'r2')};
+  const janitor=new Miniflare(janitorOptions);
+  try{
+    // Arrange: one stored object of every referenced kind, aged past the grace period, plus orphans a crash could leave
+    const ownerId=await setUp(janitor);
+    const clubOf=async()=>(await janitor.dispatchFetch(origin+'/api/club',{headers:await headers('owner')})).json();
+    const scheduledDay=await janitor.dispatchFetch(origin+'/api/club',{method:'POST',headers:await headers('owner'),body:JSON.stringify({action:'addDays',revision:(await clubOf()).revision,from:'2026-09-06',start:'07:00',end:'08:30'})});
+    const [cleanupDay]=(await scheduledDay.json()).dayIds;
+    ok((await send(janitor,'/api/photo','owner',{photo:photoFile()})).status===200,'clean-up fixture: player photo stored');
+    ok((await send(janitor,'/api/photo','owner',{target:'team',team:'red',photo:photoFile()})).status===200,'clean-up fixture: team photo stored');
+    ok((await send(janitor,'/api/video','owner',{target:'profile',playerId:ownerId,kind:'Goal',video:clipFile()})).status===200,'clean-up fixture: highlight stored');
+    ok((await send(janitor,'/api/video','owner',{target:'matchday',dayId:cleanupDay,video:clipFile()})).status===200,'clean-up fixture: matchday clip stored');
+    const fixture=await clubOf(),referenced=[fixture.players[0].photo,fixture.players[0].highlights[0].key,fixture.teams.red.photo,fixture.days[0].videoKey];
+    const ledger=await janitor.getD1Database('DB');
+    ok((await ledger.prepare('SELECT count(*) AS n FROM r2_objects WHERE created_at>=unixepoch()-60').first()).n===referenced.length,'uploads record when they were stored');
+    await ledger.prepare('UPDATE r2_objects SET created_at=unixepoch()-7200').run();
+    const orphans={old:'players/orphan-old',legacy:'videos/orphan-legacy',fresh:'players/orphan-fresh'};
+    for(const [key,age] of [[orphans.old,7200],[orphans.legacy,null],[orphans.fresh,60]]){
+      await (await janitor.getR2Bucket('BUCKET')).put(key,pngBytes);
+      await ledger.prepare('INSERT INTO r2_objects(key,bytes,created_at) VALUES(?1,?2,CASE WHEN ?3 IS NULL THEN NULL ELSE unixepoch()-?3 END)').bind(key,pngBytes.length,age).run();
+    }
+    const runCron=async()=>{const run=await (await janitor.getWorker()).scheduled({cron:'17 9 * * *'});assert.equal(run.outcome,'ok')};
+    const inLedger=async key=>!!(await (await janitor.getD1Database('DB')).prepare('SELECT 1 AS found FROM r2_objects WHERE key=?').bind(key).first());
+    const inBucket=async key=>!!(await (await janitor.getR2Bucket('BUCKET')).head(key));
+    // Act: a run while R2 deletes fail
+    await janitor.setOptions({...janitorOptions,r2Buckets:{}});
+    await runCron();
+    // Assert: the failed deletes keep their ledger rows, so storage stays counted
+    ok(await inLedger(orphans.old)&&await inLedger(orphans.legacy),'failed clean-up delete keeps the ledger row');
+    // Act: the next daily run, with R2 reachable again
+    await janitor.setOptions(janitorOptions);
+    await runCron();
+    // Assert
+    ok(!await inBucket(orphans.old)&&!await inLedger(orphans.old),'orphaned object and its ledger row removed');
+    ok(!await inBucket(orphans.legacy)&&!await inLedger(orphans.legacy),'orphan stored before upload times were recorded is removed');
+    ok(await inBucket(orphans.fresh)&&await inLedger(orphans.fresh),'object uploaded within the last hour kept');
+    for(const key of referenced)ok(await inBucket(key)&&await inLedger(key),'referenced object kept: '+key.split('/')[0]);
+  }finally{await janitor.dispose();await rm(storageDir,{recursive:true,force:true})}
   // Data migrations upgrade a club saved before them.
   const oldClub=new Miniflare({...workerOptions,bindings:accessBindings});
   try{
