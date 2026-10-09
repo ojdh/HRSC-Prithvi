@@ -312,6 +312,21 @@ try{
   ok(formation.unplaced([{id:'p1'},{id:'p2'}],keeper).map(p=>p.id).join()==='p2','the squad picker hides players already placed');
   ok(formation.shareFileName('red','Sunday 2-3-1: Press!')==='formation-red-sunday-2-3-1-press.png'&&formation.shareFileName('black','¡¡')==='formation-black.png','the shared image is named after the team and formation');
   ok(formation.initials('Ram Bahadur Thapa')==='RB'&&formation.initials('  guest ')==='G'&&formation.initials('')==='?','markers show up to two initials');
+  // Movement arrows: a touch held still for 800 ms opens the marker's menu, a move past 8 px is a drag, and a mouse uses right-click instead.
+  ok(formation.pressIntent('touch',799,0,0)==='pending'&&formation.pressIntent('touch',800,3,4)==='menu'&&formation.pressIntent('pen',1200,0,8)==='menu','a touch held still for 800 ms opens the menu');
+  ok(formation.pressIntent('touch',100,9,0)==='drag'&&formation.pressIntent('touch',900,6,6)==='drag','a touch that moves more than 8 px is a drag, however long it was held');
+  ok(formation.pressIntent('mouse',5000,0,0)==='pending'&&formation.pressIntent('mouse',10,0,9)==='drag','a mouse never long-presses; it drags once it moves');
+  const runner=[{id:'r1',playerId:'p1',label:null,x:0.5,y:0.5},{id:'r2',playerId:'p2',label:null,x:0.2,y:0.7,attack:{x:0.1,y:0.1},defend:null}];
+  const withRun=formation.setRun(runner,'r1','attack',{x:1.4,y:0.12345});
+  ok(JSON.stringify(withRun[0].attack)==='{"x":1,"y":0.123}'&&withRun[0].defend===undefined&&withRun[1]===runner[1],'an arrowhead is kept on the pitch and rounded, and other players are untouched');
+  const replaced=formation.setRun(formation.setRun(withRun,'r1','defend',{x:0.4,y:0.9}),'r1','attack',{x:0.6,y:0.2});
+  ok(JSON.stringify(replaced[0].attack)==='{"x":0.6,"y":0.2}'&&JSON.stringify(replaced[0].defend)==='{"x":0.4,"y":0.9}','each player has one attacking and one defensive run, and choosing again replaces it');
+  const cleared=formation.clearRuns(replaced,'r1');
+  ok(cleared[0].attack===null&&cleared[0].defend===null&&cleared[0].x===0.5&&formation.hasRuns(replaced[0])&&!formation.hasRuns(cleared[0])&&!formation.hasRuns(runner[0]),'removing arrows clears both runs and keeps the player');
+  ok(JSON.stringify(formation.aimStart(runner[1],'attack'))==='{"x":0.1,"y":0.1}'&&JSON.stringify(formation.aimStart(runner[0],'attack'))==='{"x":0.5,"y":0.35}'&&JSON.stringify(formation.aimStart({...runner[0],y:0.95},'defend'))==='{"x":0.5,"y":1}','aiming starts at the existing arrowhead, else a step up the pitch for attack and down for defence');
+  const arrow=formation.runArrow({x:0.5,y:0.5},{x:0.5,y:0.2});
+  ok(JSON.stringify(arrow.line)==='[34,52.5,34,23.2]'&&JSON.stringify(arrow.head)==='[[34,21],[32.79,23.2],[35.21,23.2]]','an arrow runs in metres from the player to just short of its head, with a head pointing at the target');
+  ok(formation.runArrow({x:0.5,y:0.5},{x:0.5,y:0.5})===null&&formation.runArrow({x:0.5,y:0.5},{x:0.5,y:0.51}).line[3]===52.5,'no arrow is drawn onto the player itself, and a short arrow is all head');
   ok(parsed('?view=teams&team=purple')===JSON.stringify({view:'teams'})&&parsed('?view=nowhere&day=x')===JSON.stringify({view:'overview'}),'unknown teams and pages fall back');
   ok(parsed('?view=profile&tab=bogus&day=d1')===JSON.stringify({view:'profile'})&&parsed('?view=matchdays&tab=log')===JSON.stringify({view:'matchdays'})&&parsed('?view=standings&day=x&tab=log&team=red')===JSON.stringify({view:'standings'}),'parameters a page does not use are dropped');
   ok(parsed('?player=p9&invite_error=1')===JSON.stringify({view:'overview',player:'p9'}),'a player card opens over any page; other parameters are ignored');
@@ -762,7 +777,7 @@ try{
     ok(created.status===200&&typeof created.data.id==='string','a team player creates a formation: '+JSON.stringify(created));
     let listed=await readFormations('form-red2','red'),saved=listed.data.formations?.[0];
     ok(listed.status===200&&listed.data.formations.length===1&&saved.id===created.data.id&&saved.name==='Sunday 2-3-1'&&saved.updatedBy===redId,'a teammate reads the formation');
-    ok(JSON.stringify(saved.slots)===JSON.stringify([{id:'a',playerId:redId,label:null,x:0.123,y:0.9},{id:'b',playerId:null,label:'Guest',x:0.5,y:0.25}]),'slots come back trimmed, rounded and in order: '+JSON.stringify(saved.slots));
+    ok(JSON.stringify(saved.slots)===JSON.stringify([{id:'a',playerId:redId,label:null,x:0.123,y:0.9,attack:null,defend:null},{id:'b',playerId:null,label:'Guest',x:0.5,y:0.25,attack:null,defend:null}]),'slots come back trimmed, rounded and in order: '+JSON.stringify(saved.slots));
     const moved=await formationSend('form-red2',{action:'save',id:saved.id,name:'Sunday press',slots:[slot('a',{playerId:redId},0.2,0.8),slot('c',{playerId:red2Id},0.7,0.3)]});
     ok(moved.status===200,'a teammate saves changes: '+JSON.stringify(moved));
     for(let read=0;read<2;read++){saved=(await readFormations('form-red','red')).data.formations[0];
@@ -805,6 +820,21 @@ try{
     ok(kept.length===2&&kept[1].playerId===red2Id&&kept[1].former===true&&!kept[0].former,'an archived player reads back as a former player: '+JSON.stringify(kept));
     ok((await formationSend('form-red',{action:'save',id:redPlan,name:'Moved',slots:[slot('a',{playerId:redId},0.4,0.4),slot('b',{playerId:red2Id},0.6,0.6)]})).status===200,'a formation keeping its former player can still be saved');
     await refused([slot('a',{playerId:redId}),slot('b',{playerId:red2Id}),slot('c',{playerId:goneId})],'a former player not already in the formation cannot be added');
+    // Movement arrows: each slot may carry an attacking and a defensive arrowhead, stored with the formation
+    const runs=await formationSend('form-red',{action:'save',id:redPlan,name:'Runs',slots:[slot('a',{playerId:redId,attack:{x:0.31234,y:0.1},defend:null},0.4,0.6),slot('d',{label:'Guest',defend:{x:1,y:0}},0.5,0.5)]});
+    ok(runs.status===200,'arrows save with the formation: '+JSON.stringify(runs));
+    let ran=(await readFormations('form-red','red')).data.formations.find(f=>f.id===redPlan).slots;
+    ok(JSON.stringify(ran[0].attack)==='{"x":0.312,"y":0.1}'&&ran[0].defend===null&&ran[1].attack===null&&JSON.stringify(ran[1].defend)==='{"x":1,"y":0}','arrows read back rounded, and a missing arrow reads as none: '+JSON.stringify(ran));
+    await formationSend('form-red',{action:'save',id:redPlan,name:'Runs',slots:[slot('a',{playerId:redId,attack:ran[0].attack,defend:{x:0.5,y:0.9}},0.7,0.2),ran[1]]});
+    ran=(await readFormations('form-red','red')).data.formations.find(f=>f.id===redPlan).slots;
+    ok(ran[0].x===0.7&&ran[0].y===0.2&&JSON.stringify(ran[0].attack)==='{"x":0.312,"y":0.1}'&&JSON.stringify(ran[0].defend)==='{"x":0.5,"y":0.9}','arrowheads stay put when their player is moved and saved: '+JSON.stringify(ran));
+    for(const bad of [{x:1.5,y:0.5},{x:0.5,y:-0.01},{x:'0.5',y:0.5},{x:0.5},{x:null,y:0.5},[0.5,0.5],'up',0.5,true])await refused([slot('a',{playerId:redId,attack:bad})],'attacking arrowheads must be on the pitch: '+JSON.stringify(bad));
+    await refused([slot('a',{label:'Guest',defend:{x:0.5,y:2}})],'defensive arrowheads must be on the pitch');
+    ok((await readFormations('form-red','red')).data.formations.find(f=>f.id===redPlan).slots[0].x===0.7,'refused arrows change nothing');
+    // A formation saved before arrows existed still reads, with no arrows
+    await (await formations.getD1Database('DB')).prepare('UPDATE formations SET slots=? WHERE id=?').bind(JSON.stringify([{id:'old',playerId:redId,label:null,x:0.5,y:0.9}]),redPlan).run();
+    const legacy=await readFormations('form-red','red'),legacySlots=legacy.data.formations?.find(f=>f.id===redPlan)?.slots;
+    ok(legacy.status===200&&legacySlots.length===1&&legacySlots[0].x===0.5&&legacySlots[0].attack===null&&legacySlots[0].defend===null,'a formation saved before arrows reads with none: '+JSON.stringify(legacySlots));
   }finally{await formations.dispose()}
   // Data migrations upgrade a club saved before them.
   const oldClub=new Miniflare({...workerOptions,bindings:accessBindings});

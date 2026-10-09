@@ -1,9 +1,12 @@
-import { PITCH, PITCH_MARKINGS } from '@/lib/formation';
+import { PITCH, PITCH_MARKINGS, RUN_KINDS, runArrow, type PitchPoint } from '@/lib/formation';
 
 // A marker as the shared image shows it. photo is a same-origin URL, so drawing it keeps the canvas exportable.
-export type ImageMarker = { name: string; initials: string; photo: string | null; x: number; y: number };
+// attack and defend are the arrowheads of the runs to draw, if any.
+export type ImageMarker = { name: string; initials: string; photo: string | null; x: number; y: number; attack: PitchPoint | null; defend: PitchPoint | null };
 
 const WIDTH = 1080, HEADER = 190, PAD = 40, SCALE = (WIDTH - 2 * PAD) / (PITCH.width + 2 * PITCH.margin), DISC = 46;
+// Run line widths and the defensive dash, in pitch metres, as the on-screen arrows in motion.css draw them.
+const RUN = { casing: 1, line: 0.55, head: 0.45, dash: [1.6, 1.1] };
 
 // Draws the formation as a PNG: a header with the team and formation names, then the pitch and its markers.
 // Colours come from the on-screen pitch's CSS variables, so the image matches the theme.
@@ -37,6 +40,10 @@ export async function formationImage(pitch: HTMLElement, team: string, formation
   for (const [x1, y1, x2, y2] of PITCH_MARKINGS.lines) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); }
   for (const [x, y, r] of PITCH_MARKINGS.circles) { ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.stroke(); }
   for (const [x, y] of PITCH_MARKINGS.spots) { ctx.beginPath(); ctx.arc(x, y, 0.5, 0, 2 * Math.PI); ctx.fill(); }
+  for (const marker of markers) for (const kind of RUN_KINDS) {
+    const head = marker[kind], arrow = head && runArrow(marker, head);
+    if (arrow) drawRun(ctx, arrow, kind === 'defend', color(kind === 'attack' ? '--run-attack' : '--run-defend'), color('--run-casing'));
+  }
   ctx.restore();
 
   const photos = await Promise.all(markers.map(m => m.photo ? loadImage(m.photo) : null));
@@ -73,6 +80,28 @@ export async function formationImage(pitch: HTMLElement, team: string, formation
     ctx.fillText(label, cx, cy + DISC + 11, 210);
   });
   return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('The formation image could not be made.')), 'image/png'));
+}
+
+// Attack is a solid line and defence a dashed one, each over a dark casing so it reads on the grass, with a head.
+function drawRun(ctx: CanvasRenderingContext2D, arrow: NonNullable<ReturnType<typeof runArrow>>, dashed: boolean, fill: string, casing: string) {
+  const [x1, y1, x2, y2] = arrow.line;
+  ctx.lineCap = 'butt';
+  ctx.setLineDash(dashed ? RUN.dash : []);
+  for (const [style, width] of [[casing, RUN.casing], [fill, RUN.line]] as const) {
+    ctx.strokeStyle = style;
+    ctx.lineWidth = width;
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  arrow.head.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+  ctx.closePath();
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = casing;
+  ctx.lineWidth = RUN.head;
+  ctx.stroke();
+  ctx.fillStyle = fill;
+  ctx.fill();
 }
 
 // A photo that fails to load is drawn as initials instead.

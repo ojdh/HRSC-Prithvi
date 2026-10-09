@@ -1,9 +1,10 @@
 'use client';
-import { createContext,useCallback,useContext,useEffect,useState,useRef,type CSSProperties,type ReactNode } from 'react';
-import { Settings2,UserMinus,UserRoundCheck,MapPin,Sparkles,Activity,CalendarDays,Trophy,Users,UserRound,Vote,Shield,ArrowUpRight,ArrowRight,Plus,ChevronRight,House,Clock3,Check,Upload,Download,LogIn,LogOut,Link2,Undo2,Info,Target,Goal,Flag,Pencil,Loader2,CheckCircle2,Timer,Cake,Trash2,ZoomIn,History,MessagesSquare,ImagePlus,RefreshCw,Send,X,Shirt,Share2,Save } from 'lucide-react';
+import { createContext,useCallback,useContext,useEffect,useState,useRef,type CSSProperties,type KeyboardEvent as ReactKeyboardEvent,type PointerEvent as ReactPointerEvent,type ReactNode } from 'react';
+import { Settings2,UserMinus,UserRoundCheck,MapPin,Sparkles,Activity,CalendarDays,Trophy,Users,UserRound,Vote,Shield,ArrowUpRight,ArrowRight,Plus,ChevronRight,House,Clock3,Check,Upload,Download,LogIn,LogOut,Link2,Undo2,Info,Target,Goal,Flag,Pencil,Loader2,CheckCircle2,Timer,Cake,Trash2,ZoomIn,History,MessagesSquare,ImagePlus,RefreshCw,Send,X,Shirt,Share2,Save,Eraser } from 'lucide-react';
 import { SidebarProvider,Sidebar,SidebarContent,SidebarHeader,SidebarFooter,SidebarMenu,SidebarMenuItem,SidebarMenuButton,SidebarTrigger,useSidebar } from '@/components/ui/sidebar';
 import { Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription } from '@/components/ui/dialog';
 import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from '@/components/ui/select';
+import { DropdownMenu,DropdownMenuContent,DropdownMenuItem,DropdownMenuSeparator,DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Table,TableHeader,TableRow,TableHead,TableBody,TableCell } from '@/components/ui/table';
 import { Empty,EmptyHeader,EmptyTitle,EmptyDescription } from '@/components/ui/empty';
@@ -14,7 +15,7 @@ import { toast } from 'sonner';
 import Cropper from 'react-easy-crop';
 import { compressPhoto,cropPhoto,type CropArea } from '@/lib/photo-compression';
 import { parseRoute,routeSearch,normalizeRoute,type Route,type View } from '@/lib/routes';
-import { FORMATION_LIMITS,PITCH,PITCH_MARKINGS,addSlot,canAdd,initials,nudge,pointerSpot,removeSlot,shareFileName,unplaced,type Formation,type FormationSlot } from '@/lib/formation';
+import { FORMATION_LIMITS,LONG_PRESS,PITCH,PITCH_MARKINGS,RUN_KINDS,addSlot,aimStart,canAdd,clearRuns,hasRuns,initials,nudge,pointerSpot,pressIntent,removeSlot,runArrow,setRun,shareFileName,unplaced,type Formation,type FormationSlot,type PitchPoint,type RunKind } from '@/lib/formation';
 import { formationImage } from './formation-image';
 import { TEAMS,DEFAULT_TEAMS,teamStyle,emptyClub,teamStats,playerStats,nextMatch,dateLabel,timeLabel,isReady,currentDay,clubToday,ageFrom,isBirthMonth,embedVideo,weeklyDates,validDate,teamsWithout,MAX_SERIES_DAYS,freshDraft,draftKey,gameClock,roundPayload,isPlayed,DELETION_APPROVALS,awardWinners,pastMatchdays,homeAction,dayWinners,tablePosition,matchdaySections,defaultSection,dateStrip,type MatchdaySection,BOARD_LIMITS,BOARD_REACTIONS,type BoardPage,type BoardPost,type BoardReaction,type BoardReactions,type GameDraft,type LogEntry,type LogAction,type RoundSnapshot,type Team,type TeamInfo,type Player,type Round,type ReadyDay,type Goal as GoalEntry,type PublicClub,type Day } from '@/lib/club';
 
@@ -580,19 +581,38 @@ function BoardComposer({comment=false,onPost}:{comment?:boolean;onPost:(body:str
 type FormationDraft={name:string;slots:FormationSlot[]};
 const draftOf=({name,slots}:Formation):FormationDraft=>({name,slots});
 const sameDraft=(a:FormationDraft,b:FormationDraft)=>JSON.stringify(a)===JSON.stringify(b);
+// Movement arrows: the menu's and the legend's words for each kind of run.
+const RUN_NAMES:Record<RunKind,{add:string;legend:string;aria:string}>={attack:{add:'Add attacking run',legend:'Attack',aria:'attacking run'},defend:{add:'Add defensive run',legend:'Defence',aria:'defensive run'}};
+// A press on a marker until it is let go: undecided, a drag, or a long-press that opened the marker's menu.
+type MarkerPress={id:string;pointerId:number;type:string;x:number;y:number;dx:number;dy:number;at:number;state:'pending'|'drag'|'menu';timer?:ReturnType<typeof setTimeout>};
+type RunAim={id:string;kind:RunKind;at:PitchPoint};
 async function formationRequest(body:Record<string,unknown>){const r=await fetch('/api/formation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json() as {id?:string;error?:string};if(!r.ok)throw new Error(j.error||'The formation could not be saved. Please try again.');return j}
 function TeamFormation({data,team,confirm}:{data:PublicClub;team:Team;confirm:Confirm}){
   const teamInfo=useContext(TeamsCtx),markUnsaved=useContext(UnsavedCtx),info=teamInfo[team];
   const [formations,setFormations]=useState<Formation[]|null>(null),[failed,setFailed]=useState(''),[selectedId,setSelectedId]=useState(''),[draft,setDraft]=useState<FormationDraft|null>(null);
   const [picked,setPicked]=useState(''),[dragging,setDragging]=useState(''),[naming,setNaming]=useState<'new'|'rename'|null>(null),[nameValue,setNameValue]=useState(''),[guest,setGuest]=useState(''),[busy,setBusy]=useState(false);
-  const pitch=useRef<HTMLDivElement>(null),field=useRef<HTMLDivElement>(null);
+  const [menu,setMenu]=useState<{id:string;open:boolean}|null>(null),[aim,setAim]=useState<RunAim|null>(null),[holding,setHolding]=useState(''),[headDrag,setHeadDrag]=useState('');
+  // Which kinds of arrow are drawn. A view filter only: it is not saved.
+  const [shown,setShown]=useState<Record<RunKind,boolean>>({attack:true,defend:true});
+  const pitch=useRef<HTMLDivElement>(null),field=useRef<HTMLDivElement>(null),press=useRef<MarkerPress|null>(null),markers=useRef(new Map<string,HTMLButtonElement>());
   const saved=formations?.find(f=>f.id===selectedId),dirty=!!saved&&!!draft&&!sameDraft(draft,draftOf(saved));
   const squad=data.players.filter(p=>p.team===team&&p.active!==false),selected=draft?.slots.find(s=>s.id===picked);
+  const aimed=aim?draft?.slots.find(s=>s.id===aim.id):undefined,menuSlot=menu?draft?.slots.find(s=>s.id===menu.id):undefined;
   // While there are unsaved changes, leaving within the app asks first and closing the tab asks through the browser.
+  // The next tap on the pitch, or Enter after the arrow keys, sets where the aimed run ends. A new run of a hidden kind shows that kind again.
+  const aiming=!!aim;
+  const placeRun=useCallback((at:PitchPoint)=>{if(!aim)return;const {id,kind}=aim;setDraft(d=>d&&{...d,slots:setRun(d.slots,id,kind,at)});setShown(v=>({...v,[kind]:true}));setAim(null)},[aim]);
+  // While aiming, Escape cancels wherever the focus is. The arrow keys and Enter aim from a marker or from nowhere (the focus
+  // can still be on its way back from the menu), but not from another control such as Cancel.
+  useEffect(()=>{if(!aim)return;const keys=(e:KeyboardEvent)=>{if(e.defaultPrevented)return;if(e.key==='Escape'){setAim(null);return}
+    if(e.target!==document.body&&!(e.target as Element).closest?.('.formation-marker'))return;
+    const to=nudge(aim.at,e.key);if(to){e.preventDefault();setAim({...aim,at:to})}else if(e.key==='Enter'){e.preventDefault();placeRun(aim.at)}};
+    window.addEventListener('keydown',keys);return ()=>window.removeEventListener('keydown',keys)},[aim,placeRun]);
+  useEffect(()=>()=>clearTimeout(press.current?.timer),[]);
   useEffect(()=>{markUnsaved(dirty);if(!dirty)return;const warn=(e:BeforeUnloadEvent)=>e.preventDefault();window.addEventListener('beforeunload',warn);return ()=>{window.removeEventListener('beforeunload',warn);markUnsaved(false)}},[dirty,markUnsaved]);
   async function fetchFormations(){const r=await fetch('/api/formation?team='+team,{cache:'no-store'});const j=await r.json() as {formations?:Formation[];error?:string};if(!r.ok||!j.formations)throw new Error(j.error||'The formations could not load.');return j.formations}
   // Shows the saved formations, opening `select` if it is still there, else the newest. Any unsaved changes are dropped.
-  function show(list:Formation[],select:string){const chosen=list.find(f=>f.id===select)??list[0];setFormations(list);setSelectedId(chosen?.id??'');setDraft(chosen?draftOf(chosen):null);setPicked('');setFailed('')}
+  function show(list:Formation[],select:string){const chosen=list.find(f=>f.id===select)??list[0];setFormations(list);setSelectedId(chosen?.id??'');setDraft(chosen?draftOf(chosen):null);setPicked('');setAim(null);setMenu(null);setFailed('')}
   const load=(select:string)=>fetchFormations().then(list=>show(list,select));
   const firstLoad=()=>fetchFormations().then(list=>show(list,''),(e:Error)=>setFailed(e.message));
   useEffect(()=>{void firstLoad()},[]); // eslint-disable-line react-hooks/exhaustive-deps -- the team page remounts for each team
@@ -601,17 +621,33 @@ function TeamFormation({data,team,confirm}:{data:PublicClub;team:Team;confirm:Co
   const setSlots=(change:(slots:FormationSlot[])=>FormationSlot[])=>setDraft(d=>d&&{...d,slots:change(d.slots)});
   const move=(id:string,to:{x:number;y:number})=>setSlots(slots=>slots.map(s=>s.id===id?{...s,...to}:s));
   const add=(who:{playerId:string}|{label:string})=>setSlots(slots=>addSlot(slots,who,crypto.randomUUID()));
+  function removePlayer(id:string){setSlots(slots=>removeSlot(slots,id));setPicked('');setAim(a=>a?.id===id?null:a)}
+  const spotAt=(e:{clientX:number;clientY:number})=>field.current?pointerSpot(e.clientX,e.clientY,field.current.getBoundingClientRect()):null;
+  // A press on a marker is a drag once it moves; a touch or pen held still for LONG_PRESS.ms opens the marker's menu instead.
+  function startPress(s:FormationSlot,e:ReactPointerEvent<HTMLButtonElement>){if(e.button!==0)return;e.currentTarget.setPointerCapture(e.pointerId);setPicked(s.id);
+    const p:MarkerPress={id:s.id,pointerId:e.pointerId,type:e.pointerType,x:e.clientX,y:e.clientY,dx:0,dy:0,at:e.timeStamp,state:'pending'};
+    if(e.pointerType!=='mouse'){setHolding(s.id);p.timer=setTimeout(()=>{if(press.current===p&&p.state==='pending'&&pressIntent(p.type,LONG_PRESS.ms,p.dx,p.dy)==='menu')openMenu(s.id)},LONG_PRESS.ms)}
+    clearTimeout(press.current?.timer);press.current=p}
+  function movePress(s:FormationSlot,e:ReactPointerEvent){const p=press.current;if(!p||p.id!==s.id||p.pointerId!==e.pointerId)return;p.dx=e.clientX-p.x;p.dy=e.clientY-p.y;
+    if(p.state==='pending'&&pressIntent(p.type,e.timeStamp-p.at,p.dx,p.dy)==='drag'){clearTimeout(p.timer);p.state='drag';setHolding('');setDragging(s.id)}
+    const to=p.state==='drag'&&spotAt(e);if(to)move(s.id,to)}
+  function endPress(){clearTimeout(press.current?.timer);press.current=null;setHolding('');setDragging('')}
+  function openMenu(id:string){if(press.current)press.current.state='menu';setHolding('');setPicked(id);setAim(null);setMenu({id,open:true})}
+  function markerKey(s:FormationSlot,e:ReactKeyboardEvent){
+    if(aim)return;
+    if(e.key==='ContextMenu'||(e.shiftKey&&e.key==='F10')){e.preventDefault();openMenu(s.id);return}
+    const to=nudge(s,e.key);if(to){e.preventDefault();move(s.id,to)}}
   // Switching to another formation drops unsaved changes, so it asks first.
   function leaveDraft(then:()=>void){if(dirty)confirm({title:'Leave without saving?',description:'Your changes to '+draft?.name+' have not been saved and will be lost.',action:then});else then()}
-  function choose(id:string){leaveDraft(()=>{const f=formations?.find(x=>x.id===id);if(f){setSelectedId(f.id);setDraft(draftOf(f));setPicked('')}})}
+  function choose(id:string){leaveDraft(()=>{const f=formations?.find(x=>x.id===id);if(f){setSelectedId(f.id);setDraft(draftOf(f));setPicked('');setAim(null);setMenu(null)}})}
   async function act(run:()=>Promise<void>){setBusy(true);try{await run()}catch(e){toast.error((e as Error).message)}finally{setBusy(false)}}
-  const save=()=>act(async()=>{if(!saved||!draft)return;await formationRequest({action:'save',id:saved.id,name:draft.name,slots:draft.slots.map(({id,playerId,label,x,y})=>({id,playerId,label,x,y}))});toast.success('Formation saved.');await load(saved.id)});
+  const save=()=>act(async()=>{if(!saved||!draft)return;await formationRequest({action:'save',id:saved.id,name:draft.name,slots:draft.slots.map(({id,playerId,label,x,y,attack,defend})=>({id,playerId,label,x,y,attack:attack??null,defend:defend??null}))});toast.success('Formation saved.');await load(saved.id)});
   function submitName(){const name=nameValue.trim();if(!name)return;if(naming==='rename'){setDraft(d=>d&&{...d,name});setNaming(null);return}
     void act(async()=>{const {id}=await formationRequest({action:'create',team,name});setNaming(null);toast.success('Formation created.');await load(id??'')})}
   function remove(){if(saved)confirm({title:'Delete '+saved.name+'?',description:'It is removed for the whole team. This cannot be undone.',action:()=>void act(async()=>{await formationRequest({action:'delete',id:saved.id});toast.success('Formation deleted.');await load('')})})}
   // Shares the PNG where the device can, otherwise downloads it.
   const shareImage=()=>act(async()=>{if(!draft||!pitch.current)return;
-    const blob=await formationImage(pitch.current,info.name,draft.name,draft.slots.map(s=>{const name=nameOf(s),photo=player(s)?.photo;return {name,initials:initials(name),photo:photo?'/api/photo?key='+encodeURIComponent(photo):null,x:s.x,y:s.y}}));
+    const blob=await formationImage(pitch.current,info.name,draft.name,draft.slots.map(s=>{const name=nameOf(s),photo=player(s)?.photo;return {name,initials:initials(name),photo:photo?'/api/photo?key='+encodeURIComponent(photo):null,x:s.x,y:s.y,attack:shown.attack?s.attack??null:null,defend:shown.defend?s.defend??null:null}}));
     const file=new File([blob],shareFileName(team,draft.name),{type:'image/png'});
     if(navigator.canShare?.({files:[file]}))try{await navigator.share({files:[file],title:draft.name});return}catch(e){if((e as Error).name==='AbortError')return}
     const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=file.name;link.click();URL.revokeObjectURL(url)});
@@ -626,17 +662,39 @@ function TeamFormation({data,team,confirm}:{data:PublicClub;team:Team;confirm:Co
     </div>
     {!draft?<div className="panel"><NoData title="No formations yet">Start one with New, then add up to {FORMATION_LIMITS.slots} players and drag them into place.</NoData></div>
     :<div className="formation-layout">
-      <div className="formation-pitch" ref={pitch} style={teamVars(info)}><PitchLines/>
-        <div className="formation-field" ref={field}>{draft.slots.map(s=>{const name=nameOf(s),p=player(s);return <button type="button" key={s.id} className="formation-marker" aria-pressed={picked===s.id} aria-label={name} aria-describedby="formation-help" data-former={s.former||undefined} data-dragging={dragging===s.id||undefined} style={{left:s.x*100+'%',top:s.y*100+'%'}}
-          onPointerDown={e=>{e.currentTarget.setPointerCapture(e.pointerId);setDragging(s.id);setPicked(s.id)}}
-          onPointerMove={e=>{if(dragging===s.id&&field.current)move(s.id,pointerSpot(e.clientX,e.clientY,field.current.getBoundingClientRect()))}}
-          onPointerUp={()=>setDragging('')} onPointerCancel={()=>setDragging('')} onFocus={()=>setPicked(s.id)}
-          onKeyDown={e=>{const to=nudge(s,e.key);if(to){e.preventDefault();move(s.id,to)}}}>
-          {p?<Avatar p={p}/>:<span className="avatar">{initials(name)}</span>}<span className="formation-name">{name}</span></button>})}</div>
+      <div className="formation-stage">
+        {aim&&aimed&&<div className="banner formation-aim" role="status"><span>Tap where <strong>{nameOf(aimed)}</strong> should go</span><button type="button" className="secondary-btn" onClick={()=>setAim(null)}><X/>Cancel</button></div>}
+        <div className="formation-pitch" ref={pitch} style={teamVars(info)} data-aiming={aiming||undefined} onContextMenu={e=>e.preventDefault()}
+          onPointerDownCapture={e=>{if(!aim||e.button!==0)return;e.preventDefault();e.stopPropagation();const at=spotAt(e);if(at)placeRun(at)}}
+          onPointerMove={e=>{const at=aim&&e.pointerType==='mouse'&&spotAt(e);if(at)setAim({...aim,at})}}><PitchLines/>
+          <div className="formation-field" ref={field}>
+            <svg className="formation-runs run-art" viewBox={`0 0 ${PITCH.width} ${PITCH.length}`} aria-hidden="true">{draft.slots.flatMap(s=>RUN_KINDS.map(kind=>{const preview=aim?.id===s.id&&aim.kind===kind,head=preview?aim.at:s[kind];return head&&(preview||shown[kind])?<RunArrow key={s.id+kind} kind={kind} from={s} to={head} preview={preview}/>:null}))}</svg>
+            {draft.slots.flatMap(s=>RUN_KINDS.flatMap(kind=>{const head=s[kind],key=s.id+kind;if(!head||!shown[kind]||(aim?.id===s.id&&aim.kind===kind))return [];
+              return [<button type="button" key={key} className="formation-run-head" aria-label={`${nameOf(s)}: ${RUN_NAMES[kind].aria}`} aria-describedby="formation-help" data-dragging={headDrag===key||undefined} style={{left:head.x*100+'%',top:head.y*100+'%'}}
+                onPointerDown={e=>{e.currentTarget.setPointerCapture(e.pointerId);setHeadDrag(key)}}
+                onPointerMove={e=>{const at=headDrag===key&&spotAt(e);if(at)setSlots(slots=>setRun(slots,s.id,kind,at))}}
+                onPointerUp={()=>setHeadDrag('')} onPointerCancel={()=>setHeadDrag('')}
+                onKeyDown={e=>{const to=nudge(head,e.key);if(to){e.preventDefault();setSlots(slots=>setRun(slots,s.id,kind,to))}}}/>]}))}
+            {draft.slots.map(s=>{const name=nameOf(s),p=player(s);return <button type="button" key={s.id} ref={el=>{if(el)markers.current.set(s.id,el);else markers.current.delete(s.id)}} className="formation-marker" aria-pressed={picked===s.id} aria-label={name} aria-describedby="formation-help" data-former={s.former||undefined} data-dragging={dragging===s.id||undefined} style={{left:s.x*100+'%',top:s.y*100+'%'}}
+              onPointerDown={e=>startPress(s,e)} onPointerMove={e=>movePress(s,e)} onPointerUp={endPress} onPointerCancel={endPress} onFocus={()=>setPicked(s.id)}
+              onContextMenu={e=>{e.preventDefault();if(press.current&&press.current.type!=='mouse')return;openMenu(s.id)}} onKeyDown={e=>markerKey(s,e)}>
+              {holding===s.id&&<svg className="formation-hold" viewBox="0 0 40 40" aria-hidden="true"><circle cx={20} cy={20} r={18} pathLength={100} style={{animationDuration:LONG_PRESS.ms+'ms'}}/></svg>}
+              {p?<Avatar p={p}/>:<span className="avatar">{initials(name)}</span>}<span className="formation-name">{name}</span></button>})}
+            <DropdownMenu open={!!menu?.open&&!!menuSlot} onOpenChange={open=>{if(!open)setMenu(m=>m&&{...m,open:false})}}>
+              <DropdownMenuTrigger asChild><span className="formation-menu-anchor" aria-hidden="true" style={menuSlot?{left:menuSlot.x*100+'%',top:menuSlot.y*100+'%'}:undefined}/></DropdownMenuTrigger>
+              <DropdownMenuContent className="formation-menu" collisionPadding={8} aria-label={menuSlot?nameOf(menuSlot):undefined} onCloseAutoFocus={e=>{e.preventDefault();if(menu)markers.current.get(menu.id)?.focus()}}>
+                {menuSlot&&<>{RUN_KINDS.map(kind=><DropdownMenuItem key={kind} onSelect={()=>setAim({id:menuSlot.id,kind,at:aimStart(menuSlot,kind)})}><RunSwatch kind={kind}/>{RUN_NAMES[kind].add}</DropdownMenuItem>)}
+                  {hasRuns(menuSlot)&&<DropdownMenuItem onSelect={()=>setSlots(slots=>clearRuns(slots,menuSlot.id))}><Eraser/>Remove arrows</DropdownMenuItem>}
+                  <DropdownMenuSeparator/><DropdownMenuItem variant="destructive" onSelect={()=>removePlayer(menuSlot.id)}><UserMinus/>Remove player</DropdownMenuItem></>}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+        <div className="formation-legend" role="group" aria-label="Show arrows">{RUN_KINDS.map(kind=><button type="button" key={kind} className="formation-chip" aria-pressed={shown[kind]} onClick={()=>setShown(v=>({...v,[kind]:!v[kind]}))}><RunSwatch kind={kind}/>{RUN_NAMES[kind].legend}</button>)}</div>
       </div>
       <div className="formation-side">
-        <p className="help" id="formation-help">Drag players into place, or select one and move it with the arrow keys.</p>
-        {selected&&<div className="formation-selected"><span>Selected: <strong>{nameOf(selected)}</strong></span><button type="button" className="secondary-btn remove-btn" onClick={()=>{setSlots(slots=>removeSlot(slots,selected.id));setPicked('')}}><UserMinus/>Remove</button></div>}
+        <p className="help" id="formation-help">Drag players into place, or select one and move it with the arrow keys. To add a run, right-click or hold a player (or press Shift+F10), then tap where they should go, or move the arrow with the arrow keys and press Enter.</p>
+        {selected&&<div className="formation-selected"><span>Selected: <strong>{nameOf(selected)}</strong></span><button type="button" className="secondary-btn remove-btn" onClick={()=>removePlayer(selected.id)}><UserMinus/>Remove</button></div>}
         <section className="panel formation-add"><div className="panel-head"><h2>Add a player</h2><span className="help">{draft.slots.length} of {FORMATION_LIMITS.slots}</span></div>
           <div className="field">From the squad<Picker label="Choose a squad player" disabled={!room||!unplaced(squad,draft.slots).length} value="" onChange={id=>add({playerId:id})} options={unplaced(squad,draft.slots).map(p=>({value:p.id,label:p.name}))}/></div>
           <form className="formation-guest" onSubmit={e=>{e.preventDefault();add({label:guest});setGuest('')}}><label className="field">Or a placeholder name<input value={guest} maxLength={FORMATION_LIMITS.label} disabled={!room} placeholder="Guest striker" onChange={e=>setGuest(e.target.value)}/></label><button className="secondary-btn" disabled={!room||!guest.trim()}><Plus/>Add</button></form>
@@ -656,3 +714,7 @@ function PitchLines(){return <svg className="formation-lines" viewBox={PITCH_BOX
   {PITCH_MARKINGS.lines.map(([x1,y1,x2,y2])=><line key={`${x1},${y1}`} x1={x1} y1={y1} x2={x2} y2={y2}/>)}
   {PITCH_MARKINGS.circles.map(([cx,cy,r])=><circle key={`${cx},${cy}`} cx={cx} cy={cy} r={r}/>)}
   {PITCH_MARKINGS.spots.map(([cx,cy])=><circle key={`${cx},${cy}`} className="spot" cx={cx} cy={cy} r={0.5}/>)}</svg>}
+// A run from a player to its arrowhead, in pitch metres. Attack is a solid line and defence a dashed one, so they differ without colour.
+function RunArrow({kind,from,to,preview}:{kind:RunKind;from:PitchPoint;to:PitchPoint;preview:boolean}){const arrow=runArrow(from,to);if(!arrow)return null;const [x1,y1,x2,y2]=arrow.line;
+  return <g data-kind={kind} data-preview={preview||undefined}><line className="casing" x1={x1} y1={y1} x2={x2} y2={y2}/><line className="run" x1={x1} y1={y1} x2={x2} y2={y2}/><polygon points={arrow.head.join(' ')}/></g>}
+function RunSwatch({kind}:{kind:RunKind}){return <svg className="formation-swatch run-art" viewBox="0 0 24 8" aria-hidden="true"><g data-kind={kind}><line className="casing" x1={1} y1={4} x2={23} y2={4}/><line className="run" x1={1} y1={4} x2={23} y2={4}/></g></svg>}
