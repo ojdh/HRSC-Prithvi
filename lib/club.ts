@@ -116,7 +116,7 @@ export function currentDay(days:Day[],today:string){const sorted=[...days].sort(
 export function pastMatchdays(days:Day[],today:string){return days.filter(d=>d.date<today&&d.rounds.length).sort((a,b)=>b.date.localeCompare(a.date));}
 // The matchday page's sections. Live is the admins' scoring board, from the day itself on, so games can still be recorded after the session.
 export type MatchdaySection='results'|'live'|'vote';
-export function matchdaySections(day:Day,today:string,isAdmin:boolean):MatchdaySection[]{return isAdmin&&day.date<=today?['results','live','vote']:['results','vote'];}
+export function matchdaySections(day:Day,today:string,isAdmin:boolean):MatchdaySection[]{return isAdmin&&day.date<=today?['live','vote','results']:['vote','results'];}
 // The section a matchday opens on: Live for admins during the session, Vote while voting is open, otherwise Results.
 export function defaultSection(day:Day,today:string,isAdmin:boolean):MatchdaySection{return isAdmin&&day.date===today&&day.poll!=='closed'?'live':day.poll==='open'?'vote':'results';}
 // Every matchday oldest first, marked past, today or upcoming; live is today's set-up session before voting closes.

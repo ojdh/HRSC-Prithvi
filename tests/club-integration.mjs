@@ -342,7 +342,7 @@ try{
   // Matchday page: which sections show, which one it opens on, and the date strip.
   const md=(date,poll='ready',ready=true)=>({...played('x',[]),date,poll,rounds:[],...(ready?{}:{opening:null,firstExit:null})});
   const sections=(day,admin)=>model.matchdaySections(day,'2026-10-08',admin).join();
-  ok(sections(md('2026-10-08'),false)==='results,vote'&&sections(md('2026-10-08'),true)==='results,live,vote'&&sections(md('2026-10-01'),true)==='results,live,vote'&&sections(md('2026-10-15'),true)==='results,vote','Live is for admins, from the day itself on');
+  ok(sections(md('2026-10-08'),false)==='vote,results'&&sections(md('2026-10-08'),true)==='live,vote,results'&&sections(md('2026-10-01'),true)==='live,vote,results'&&sections(md('2026-10-15'),true)==='vote,results','Live is for admins, from the day itself on; sections run Record games, Vote, Results');
   const opens=(day,admin)=>model.defaultSection(day,'2026-10-08',admin);
   ok(opens(md('2026-10-08'),true)==='live'&&opens(md('2026-10-08','open'),true)==='live'&&opens(md('2026-10-08','closed'),true)==='results','admins open on Live during the session');
   ok(opens(md('2026-10-08','open'),false)==='vote'&&opens(md('2026-10-01','open'),true)==='vote'&&opens(md('2026-10-08'),false)==='results'&&opens(md('2026-10-08','closed'),false)==='results'&&opens(md('2026-10-15'),true)==='results','Vote while voting is open, otherwise Results');
