@@ -112,6 +112,13 @@ export function clubToday(){return new Date().toLocaleDateString('en-CA',{timeZo
 export function currentDay(days:Day[],today:string){const sorted=[...days].sort((a,b)=>a.date.localeCompare(b.date));return sorted.find(d=>d.date>=today)??sorted.at(-1);}
 // Played matchdays (at least one round) before today, newest first.
 export function pastMatchdays(days:Day[],today:string){return days.filter(d=>d.date<today&&d.rounds.length).sort((a,b)=>b.date.localeCompare(a.date));}
+// The matchday page's sections. Live is the admins' scoring board, from the day itself on, so games can still be recorded after the session.
+export type MatchdaySection='results'|'live'|'vote';
+export function matchdaySections(day:Day,today:string,isAdmin:boolean):MatchdaySection[]{return isAdmin&&day.date<=today?['results','live','vote']:['results','vote'];}
+// The section a matchday opens on: Live for admins during the session, Vote while voting is open, otherwise Results.
+export function defaultSection(day:Day,today:string,isAdmin:boolean):MatchdaySection{return isAdmin&&day.date===today&&day.poll!=='closed'?'live':day.poll==='open'?'vote':'results';}
+// Every matchday oldest first, marked past, today or upcoming; live is today's set-up session before voting closes.
+export function dateStrip(days:Day[],today:string){return [...days].sort((a,b)=>a.date.localeCompare(b.date)).map(day=>({day,when:day.date<today?'past' as const:day.date===today?'today' as const:'upcoming' as const,live:day.date===today&&isReady(day)&&day.poll!=='closed'}));}
 // Player of the day: everyone tied on the most votes. A closed poll's tally arrives sorted by votes, highest first.
 export function awardWinners(tally:{candidate:string;votes:number}[]){const max=tally[0]?.votes||0;return tally.filter(x=>x.votes===max);}
 export function timeLabel(day:Day){return clockLabel(day.start)+'–'+clockLabel(day.end);}

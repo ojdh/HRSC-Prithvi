@@ -278,13 +278,15 @@ try{
   // URL routing: every address parses to one page state and builds back to the same address.
   const routes=(await libModule('lib/routes.ts',{'./club':club.url})).module;
   const parsed=search=>JSON.stringify(routes.parseRoute(search));
-  for(const route of [{view:'overview'},{view:'matchdays',day:'d1'},{view:'vote',day:'d1'},{view:'gameday',day:'d1'},{view:'admin',day:'d1',tab:'results'},{view:'admin',tab:'log'},{view:'players',team:'red'},{view:'standings',player:'p1'},{view:'players',team:'white',player:'p2'},{view:'board'},{view:'profile'},{view:'guide'}])
+  for(const route of [{view:'overview'},{view:'matchdays',day:'d1'},{view:'matchdays',day:'d1',tab:'vote'},{view:'matchdays',tab:'live'},{view:'matchdays',day:'d1',tab:'results'},{view:'admin',tab:'log'},{view:'players',team:'red'},{view:'standings',player:'p1'},{view:'players',team:'white',player:'p2'},{view:'board'},{view:'profile'},{view:'guide'}])
     ok(parsed(routes.routeSearch(route))===JSON.stringify(route),'route round trip '+JSON.stringify(route));
-  ok(routes.routeSearch({view:'overview'})===''&&routes.routeSearch({view:'vote',day:'d 1'})==='?view=vote&day=d+1','home has a bare address; values are encoded');
-  ok(parsed('?view=vote&day=legacy')===JSON.stringify({view:'vote',day:'legacy'}),'shared vote links keep their day');
+  ok(routes.routeSearch({view:'overview'})===''&&routes.routeSearch({view:'matchdays',day:'d 1',tab:'vote'})==='?view=matchdays&day=d+1&tab=vote','home has a bare address; values are encoded');
+  ok(parsed('?view=vote&day=legacy')===JSON.stringify({view:'matchdays',day:'legacy',tab:'vote'})&&parsed('?view=vote')===JSON.stringify({view:'matchdays',tab:'vote'}),'shared vote links open that day\'s vote');
+  ok(parsed('?view=gameday&day=d2')===JSON.stringify({view:'matchdays',day:'d2',tab:'live'}),'Gameday links open the live section');
+  ok(parsed('?view=admin&tab=results&day=d3')===JSON.stringify({view:'matchdays',day:'d3'})&&parsed('?view=admin&tab=roster')===JSON.stringify({view:'admin',tab:'roster'}),'Match control links open the matchday page');
   ok(parsed('?team=black')===JSON.stringify({view:'players',team:'black'}),'a team on its own opens that squad');
   ok(parsed('?view=players&team=purple')===JSON.stringify({view:'players'})&&parsed('?view=nowhere&day=x')===JSON.stringify({view:'overview'}),'unknown teams and pages fall back');
-  ok(parsed('?view=admin&tab=bogus')===JSON.stringify({view:'admin'})&&parsed('?view=standings&day=x&tab=log&team=red')===JSON.stringify({view:'standings'}),'parameters a page does not use are dropped');
+  ok(parsed('?view=admin&tab=bogus&day=d1')===JSON.stringify({view:'admin'})&&parsed('?view=matchdays&tab=log')===JSON.stringify({view:'matchdays'})&&parsed('?view=standings&day=x&tab=log&team=red')===JSON.stringify({view:'standings'}),'parameters a page does not use are dropped');
   ok(parsed('?player=p9&invite_error=1')===JSON.stringify({view:'overview',player:'p9'}),'a player card opens over any page; other parameters are ignored');
   ok(model.embedVideo('https://youtu.be/dQw4w9WgXcQ')==='https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ'&&!model.isVideoUrl('http://youtube.com/x')&&model.isVideoUrl('https://vimeo.com/1')&&model.weeklyDates('2026-09-13','2026-11-29').length===12,'video links and weekly dates');
   const played=(id,roster)=>({id,date:'2026-09-06',start:'07:00',end:'08:30',roster,opening:['red','black'],firstExit:'red',poll:'ready',rounds:[{id:'r',a:'red',b:'black',scoreA:0,scoreB:0,goals:[],lineup:[],exit:'red',winner:null}]});
@@ -295,6 +297,16 @@ try{
   const archive=model.pastMatchdays([onDate('sep06','2026-09-06'),onDate('sep20','2026-09-20'),onDate('sep13','2026-09-13'),onDate('today','2026-10-08'),onDate('future','2026-10-15')],'2026-10-08').map(d=>d.id);
   ok(JSON.stringify(archive)==='["sep20","sep13","sep06"]','past matchdays list days before today, newest first');
   ok(model.pastMatchdays([onDate('empty','2026-09-06',0)],'2026-10-08').length===0,'past matchdays skip days with no rounds');
+  // Matchday page: which sections show, which one it opens on, and the date strip.
+  const md=(date,poll='ready',ready=true)=>({...played('x',[]),date,poll,rounds:[],...(ready?{}:{opening:null,firstExit:null})});
+  const sections=(day,admin)=>model.matchdaySections(day,'2026-10-08',admin).join();
+  ok(sections(md('2026-10-08'),false)==='results,vote'&&sections(md('2026-10-08'),true)==='results,live,vote'&&sections(md('2026-10-01'),true)==='results,live,vote'&&sections(md('2026-10-15'),true)==='results,vote','Live is for admins, from the day itself on');
+  const opens=(day,admin)=>model.defaultSection(day,'2026-10-08',admin);
+  ok(opens(md('2026-10-08'),true)==='live'&&opens(md('2026-10-08','open'),true)==='live'&&opens(md('2026-10-08','closed'),true)==='results','admins open on Live during the session');
+  ok(opens(md('2026-10-08','open'),false)==='vote'&&opens(md('2026-10-01','open'),true)==='vote'&&opens(md('2026-10-08'),false)==='results'&&opens(md('2026-10-08','closed'),false)==='results'&&opens(md('2026-10-15'),true)==='results','Vote while voting is open, otherwise Results');
+  const strip=model.dateStrip([{...md('2026-10-15'),id:'next'},{...md('2026-10-08'),id:'today'},{...md('2026-09-20'),id:'old'},{...md('2026-10-01','closed'),id:'last'}],'2026-10-08');
+  ok(strip.map(s=>s.day.id+':'+s.when).join()==='old:past,last:past,today:today,next:upcoming','date strip runs from past days through today to upcoming days');
+  ok(strip.filter(s=>s.live).map(s=>s.day.id).join()==='today'&&!model.dateStrip([md('2026-10-08','closed')],'2026-10-08')[0].live&&!model.dateStrip([md('2026-10-08','ready',false)],'2026-10-08')[0].live,'only today\'s set-up, unclosed session shows as live');
   ok(JSON.stringify(model.awardWinners([{candidate:'a',votes:3},{candidate:'b',votes:3},{candidate:'c',votes:1}]).map(w=>w.candidate))==='["a","b"]'&&model.awardWinners([]).length===0,'player of the day is everyone tied on the most votes');
   const squad=[{id:'r1',team:'red'},{id:'w1',team:'white'}];
   ok(JSON.stringify(model.teamsWithout(squad.map(p=>p.id),squad))==='["black"]'&&JSON.stringify(model.teamsWithout(['r1'],squad))==='["black","white"]'&&model.teamsWithout(['r1','w1','b1'],[...squad,{id:'b1',team:'black'}]).length===0,'matchday setup names the teams with nobody attending');
