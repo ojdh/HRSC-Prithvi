@@ -4,7 +4,7 @@ export const VIEWS=['overview','matchdays','standings','teams','profile'] as con
 export type View=typeof VIEWS[number];
 export type Route={view:View;day?:string;tab?:string;team?:Team;player?:string};
 // The sections a page can open on; the first is its default.
-export const TABS:Partial<Record<View,readonly string[]>>={matchdays:['results','live','vote'],teams:['squad','stats','board'],profile:['profile','guide','admin']};
+export const TABS:Partial<Record<View,readonly string[]>>={matchdays:['results','live','vote'],teams:['squad','stats','board','formation'],profile:['profile','guide','admin']};
 const DAY_VIEWS:readonly View[]=['matchdays'],TEAM_VIEWS:readonly View[]=['teams'];
 // Pages that became sections of another page, keyed by their old view and, for the Control room, its old tab.
 const MOVED:Record<string,{view:View;tab?:string}>={vote:{view:'matchdays',tab:'vote'},gameday:{view:'matchdays',tab:'live'},'admin/results':{view:'matchdays'},'admin/roster':{view:'teams'},players:{view:'teams'},board:{view:'teams',tab:'board'},admin:{view:'profile',tab:'admin'},guide:{view:'profile',tab:'guide'}};

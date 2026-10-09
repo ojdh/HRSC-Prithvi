@@ -1,6 +1,6 @@
 'use client';
-import { createContext,useContext,useEffect,useState,useRef,type CSSProperties,type ReactNode } from 'react';
-import { Settings2,UserMinus,UserRoundCheck,MapPin,Sparkles,Activity,CalendarDays,Trophy,Users,UserRound,Vote,Shield,ArrowUpRight,ArrowRight,Plus,ChevronRight,House,Clock3,Check,Upload,Download,LogIn,LogOut,Link2,Undo2,Info,Target,Goal,Flag,Pencil,Loader2,CheckCircle2,Timer,Cake,Trash2,ZoomIn,History,MessagesSquare,ImagePlus,RefreshCw,Send,X } from 'lucide-react';
+import { createContext,useCallback,useContext,useEffect,useState,useRef,type CSSProperties,type ReactNode } from 'react';
+import { Settings2,UserMinus,UserRoundCheck,MapPin,Sparkles,Activity,CalendarDays,Trophy,Users,UserRound,Vote,Shield,ArrowUpRight,ArrowRight,Plus,ChevronRight,House,Clock3,Check,Upload,Download,LogIn,LogOut,Link2,Undo2,Info,Target,Goal,Flag,Pencil,Loader2,CheckCircle2,Timer,Cake,Trash2,ZoomIn,History,MessagesSquare,ImagePlus,RefreshCw,Send,X,Shirt,Share2,Save } from 'lucide-react';
 import { SidebarProvider,Sidebar,SidebarContent,SidebarHeader,SidebarFooter,SidebarMenu,SidebarMenuItem,SidebarMenuButton,SidebarTrigger,useSidebar } from '@/components/ui/sidebar';
 import { Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription } from '@/components/ui/dialog';
 import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from '@/components/ui/select';
@@ -14,6 +14,8 @@ import { toast } from 'sonner';
 import Cropper from 'react-easy-crop';
 import { compressPhoto,cropPhoto,type CropArea } from '@/lib/photo-compression';
 import { parseRoute,routeSearch,normalizeRoute,type Route,type View } from '@/lib/routes';
+import { FORMATION_LIMITS,PITCH,PITCH_MARKINGS,addSlot,canAdd,initials,nudge,pointerSpot,removeSlot,shareFileName,unplaced,type Formation,type FormationSlot } from '@/lib/formation';
+import { formationImage } from './formation-image';
 import { TEAMS,DEFAULT_TEAMS,teamStyle,emptyClub,teamStats,playerStats,nextMatch,dateLabel,timeLabel,isReady,currentDay,clubToday,ageFrom,isBirthMonth,embedVideo,weeklyDates,validDate,teamsWithout,MAX_SERIES_DAYS,freshDraft,draftKey,gameClock,roundPayload,isPlayed,DELETION_APPROVALS,awardWinners,pastMatchdays,homeAction,dayWinners,tablePosition,matchdaySections,defaultSection,dateStrip,type MatchdaySection,BOARD_LIMITS,BOARD_REACTIONS,type BoardPage,type BoardPost,type BoardReaction,type BoardReactions,type GameDraft,type LogEntry,type LogAction,type RoundSnapshot,type Team,type TeamInfo,type Player,type Round,type ReadyDay,type Goal as GoalEntry,type PublicClub,type Day } from '@/lib/club';
 
 const NAV:readonly (readonly [View,string,typeof House])[]=[['overview','Home',House],['matchdays','Matchdays',CalendarDays],['standings','Table',Trophy],['teams','Teams',Shield],['profile','Me',UserRound]];
@@ -23,6 +25,12 @@ const here=()=>parseRoute(location.search);
 // the address, so callbacks registered once never act on a stale page. Returns the route now shown.
 type RouteOptions={replace?:boolean;state?:{player:true}|null};
 function routeTo(next:Route,{replace=false,state=null}:RouteOptions={}):Route{const from=here(),to=normalizeRoute(next),url=location.pathname+routeSearch(to)+location.hash;if(replace)history.replaceState(state,'',url);else if(url!==location.pathname+location.search+location.hash)history.pushState(state,'',url);if(to.view!==from.view)window.scrollTo({top:0,behavior:'smooth'});return to}
+// Leaving a formation with unsaved changes asks first. unsaved is set by the formation builder.
+// changesPage: whether going to `next` leaves the page or section shown at `from`, as opposed to opening a player card over it.
+function changesPage(from:Route,next:Route){const to=normalizeRoute(next);return to.view!==from.view||to.team!==from.team||to.tab!==from.tab}
+function leaveFormation(unsaved:{current:boolean},confirm:Confirm,proceed:()=>void){confirm({title:'Leave without saving?',description:'Your changes to this formation have not been saved and will be lost.',action:()=>{unsaved.current=false;proceed()}})}
+// Opens a route as routeTo does, after asking when it would leave unsaved formation changes.
+function openRoute(next:Route,options:RouteOptions,unsaved:{current:boolean},confirm:Confirm,show:(route:Route)=>void){const open=()=>show(routeTo(next,options));if(unsaved.current&&changesPage(here(),next))leaveFormation(unsaved,confirm,open);else open()}
 type Action=(action:string,body?:Record<string,unknown>)=>Promise<Record<string,any>|null>;
 function AnimatedNumber({value,pad=0}:{value:number;pad?:number}){
   const [shown,setShown]=useState(0),[moving,setMoving]=useState(false);
@@ -40,12 +48,14 @@ function Avatar({p,size=''}:{p?:Player;size?:string}){return <span className={'a
 const TeamsCtx=createContext(DEFAULT_TEAMS);
 // Opens a team page or a player card from anywhere in the app.
 const LinksCtx=createContext<{team:(team:Team)=>void;player:(id:string)=>void}>({team:()=>{},player:()=>{}});
+// Whether the open formation has unsaved changes, so the app asks before leaving it.
+const UnsavedCtx=createContext<(dirty:boolean)=>void>(()=>{});
 function TeamLink({team,className='',children}:{team:Team;className?:string;children?:ReactNode}){const teamInfo=useContext(TeamsCtx),open=useContext(LinksCtx);return <button type="button" className={'team-link team-name '+className} style={teamVars(teamInfo[team])} onClick={()=>open.team(team)}>{children??teamInfo[team].name}</button>}
 // A player's name that opens their card; a player no longer on the roster stays plain text.
 function PlayerLink({id,players,fallback='Club player'}:{id:string|null;players:Player[];fallback?:string}){const open=useContext(LinksCtx),p=players.find(x=>x.id===id);return p?<button type="button" className="player-link" onClick={()=>open.player(p.id)}>{p.name}</button>:<>{fallback}</>}
 const teamVars=(t:TeamInfo)=>teamStyle(t) as CSSProperties;
 function Crest({team}:{team:Team}){const teamInfo=useContext(TeamsCtx),photo=teamInfo[team].photo;return <span className={'team-crest'+(photo?' has-photo':'')} data-team={team} style={teamVars(teamInfo[team])}>{photo?<img src={'/api/photo?key='+encodeURIComponent(photo)} alt={teamInfo[team].name}/>:teamInfo[team].letter}</span>}
-function Picker({value,onChange,options,label,className=''}:{value:string;onChange:(v:string)=>void;options:{value:string;label:string}[];label:string;className?:string}){return <Select value={value} onValueChange={onChange}><SelectTrigger aria-label={label} className={className}><SelectValue placeholder={label}/></SelectTrigger><SelectContent>{options.map(o=><SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent></Select>}
+function Picker({value,onChange,options,label,className='',disabled=false}:{value:string;onChange:(v:string)=>void;options:{value:string;label:string}[];label:string;className?:string;disabled?:boolean}){return <Select value={value} onValueChange={onChange} disabled={disabled}><SelectTrigger aria-label={label} className={className}><SelectValue placeholder={label}/></SelectTrigger><SelectContent>{options.map(o=><SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent></Select>}
 const teamOptions=(teamInfo:Record<Team,TeamInfo>)=>TEAMS.map(t=>({value:t,label:teamInfo[t].name}));
 function NoData({title,children}:{title:string;children?:ReactNode}){return <Empty className="empty-state"><Flag/><EmptyHeader><EmptyTitle>{title}</EmptyTitle><EmptyDescription>{children}</EmptyDescription></EmptyHeader></Empty>}
 function SideNav({view,navigate}:{view:View;navigate:(v:View)=>void}){const {setOpenMobile}=useSidebar();return <Sidebar className="club-sidebar" style={{'--sidebar-width':'238px'} as CSSProperties}><SidebarHeader className="p-0"><a className="brand" href="/" aria-label="Prithvi FC homepage"><span className="brand-mark"><span>HR</span><small>SC</small></span><div><div className="brand-title">HRSC–PRITHVI</div><div className="brand-sub">THE WINTER LEAGUE</div></div></a></SidebarHeader><SidebarContent className="overflow-x-hidden"><SidebarMenu>{NAV.map(([id,label,Icon])=><SidebarMenuItem key={id}><SidebarMenuButton className="nav-button" isActive={view===id} onClick={()=>{navigate(id);setOpenMobile(false)}}><Icon/><span>{label}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu></SidebarContent></Sidebar>}
@@ -69,12 +79,17 @@ export default function ClubApp({identity,signInUrl}:{identity:{name:string}|nul
   const team=route.team??(route.tab==='board'&&member?me?.team:undefined);
   // Me's sections; Club admin is for admins only.
   const meSections:MeSection[]=data.isAdmin?['profile','guide','admin']:['profile','guide'],meSection=meSections.find(s=>s===route.tab)??'profile';
+  // The formation builder marks unsaved changes here; leaving its section, team or page then asks first.
+  const unsaved=useRef(false),shownRoute=useRef(route),markUnsaved=useCallback((dirty:boolean)=>{unsaved.current=dirty},[]);
+  useEffect(()=>{shownRoute.current=route},[route]);
   async function refresh(){try{const r=await fetch('/api/club',{cache:'no-store'});const j=await r.json() as PublicClub & {error?:string};if(!r.ok)throw new Error(j.error);setData(j);setError('');return j as PublicClub;}catch(e){setError(e instanceof Error?e.message:'Unable to load club.');return null;}finally{setLoading(false)}}
   useEffect(()=>{const q=new URLSearchParams(location.search),h=new URLSearchParams(location.hash.slice(1));if(h.get('invite')||q.get('invite')){location.replace('/join?invite='+encodeURIComponent(h.get('invite')||q.get('invite')!));return;}if(q.get('invite_error'))toast.error('This link has been used or is unavailable. Sign in if you already joined, or ask the organiser for your current invite.');if(h.get('setup')){setSetupKey(h.get('setup')!);setModal('setup')}
-    const show=()=>setRoute(parseRoute(location.search));show();history.replaceState(history.state,'',location.pathname+routeSearch(parseRoute(location.search))+location.hash);
+    // Back or Forward away from a formation with unsaved changes puts its address back and asks first.
+    const show=()=>{const next=parseRoute(location.search),from=shownRoute.current;if(unsaved.current&&changesPage(from,next)){history.pushState(history.state,'',location.pathname+routeSearch(from)+location.hash);leaveFormation(unsaved,setConfirm,()=>setRoute(routeTo(next)));return}setRoute(next)};
+    show();history.replaceState(history.state,'',location.pathname+routeSearch(parseRoute(location.search))+location.hash);
     window.addEventListener('popstate',show);void refresh();return ()=>window.removeEventListener('popstate',show);},[]);
-  const go=(next:Route,options?:RouteOptions)=>setRoute(routeTo(next,options));
-  function navigate(v:View,id?:string){setRoute(routeTo({view:v,day:id??here().day}))}
+  const go=(next:Route,options:RouteOptions={})=>openRoute(next,options,unsaved,setConfirm,setRoute);
+  function navigate(v:View,id?:string){openRoute({view:v,day:id??here().day},{},unsaved,setConfirm,setRoute)}
   function openPlayer(id:string){go({...here(),player:id},{state:{player:true}})}
   const links={team:(t:Team)=>go({view:'teams',team:t}),player:openPlayer};
   // A card opened in the app closes by going back, so Back never reopens it; one opened from a shared link is dropped from the address.
@@ -98,7 +113,7 @@ export default function ClubApp({identity,signInUrl}:{identity:{name:string}|nul
   function TeamsGrid(){return <div className="team-grid">{teams.map((s,i)=><button className={'team-card rise delay-'+(i+1)} data-team={s.team} style={teamVars(teamInfo[s.team])} key={s.team} onClick={()=>links.team(s.team)}><div className="team-top"><div className="team-title"><Crest team={s.team}/><div><h3>{teamInfo[s.team].name}</h3>{teamInfo[s.team].motto&&<p className="team-motto">{teamInfo[s.team].motto}</p>}</div></div><span className="rank">{s.played?'#'+tablePosition(teams,s.team):'—'}</span></div><div className="team-numbers"><div><strong><AnimatedNumber value={s.points} pad={2}/></strong><span>PTS</span></div><div><strong><AnimatedNumber value={s.gf} pad={2}/></strong><span>GOALS</span></div><div><strong><AnimatedNumber value={s.played} pad={2}/></strong><span>PLAYED</span></div></div><div className="team-foot"><span>{activePlayers.filter(p=>p.team===s.team).length} players</span><span>{s.form.length?s.form.slice(-5).map((f,i)=><span className={'form-dot '+f} key={i}>{f}</span>):'—'} <ArrowUpRight className="inline ml-2" size={14}/></span></div></button>)}</div>}
   function Standings(){return <><div className="table-wrap"><Table><TableHeader><TableRow>{['#','Team','Played','Pts','Wins','Draws','Losses','GF','GA','GD','Form',''].map(x=><TableHead key={x}>{x}</TableHead>)}</TableRow></TableHeader><TableBody>{teams.map(s=><TableRow key={s.team} className="row-link" onClick={()=>links.team(s.team)}><TableCell>{tablePosition(teams,s.team)??'—'}</TableCell><TableCell><div className="cell-team"><Crest team={s.team}/><TeamLink team={s.team}/></div></TableCell><TableCell>{s.played}</TableCell><TableCell className="wins-cell">{s.points}</TableCell><TableCell>{s.wins}</TableCell><TableCell>{s.draws}</TableCell><TableCell>{s.losses}</TableCell><TableCell>{s.gf}</TableCell><TableCell>{s.ga}</TableCell><TableCell>{s.gd>0?'+':''}{s.gd}</TableCell><TableCell><div className="whitespace-nowrap">{s.form.slice(-5).map((f,i)=><span className={'form-dot '+f} key={i}>{f}</span>)}{!s.form.length?'—':''}</div></TableCell><TableCell><ChevronRight className="row-chevron" size={16} aria-hidden="true"/></TableCell></TableRow>)}</TableBody></Table></div><p className="table-note">Points (3 for a win, 1 for a draw), then goal difference, then goals scored.</p></>}
 
-  return <TeamsCtx.Provider value={teamInfo}><LinksCtx.Provider value={links}><SidebarProvider style={{'--sidebar-width':'238px'} as CSSProperties}><SideNav view={view} navigate={navigate}/><div className="main-shell"><header className="topbar"><div className="breadcrumb"><SidebarTrigger className="mobile-menu"/><span>HRSC–Prithvi</span><ChevronRight size={14}/><strong>{NAV.find(n=>n[0]===view)?.[1]}</strong></div><div className="top-right"><PhoneApp/>{identity?<button className="user-button" onClick={()=>navigate('profile')}><Avatar p={me}/><span className="user-name">{me?.name.split(' ')[0]||identity.name.split(' ')[0]}<small>{data.isOwner?'Club owner':data.isAdmin?'Club admin':'Club member'}</small></span></button>:<a className="secondary-btn" href={signInUrl} onClick={e=>{e.currentTarget.href=authLink()}} target="_top"><LogIn size={15}/>Sign in</a>}</div></header><main className="content" key={view}>
+  return <TeamsCtx.Provider value={teamInfo}><LinksCtx.Provider value={links}><UnsavedCtx.Provider value={markUnsaved}><SidebarProvider style={{'--sidebar-width':'238px'} as CSSProperties}><SideNav view={view} navigate={navigate}/><div className="main-shell"><header className="topbar"><div className="breadcrumb"><SidebarTrigger className="mobile-menu"/><span>HRSC–Prithvi</span><ChevronRight size={14}/><strong>{NAV.find(n=>n[0]===view)?.[1]}</strong></div><div className="top-right"><PhoneApp/>{identity?<button className="user-button" onClick={()=>navigate('profile')}><Avatar p={me}/><span className="user-name">{me?.name.split(' ')[0]||identity.name.split(' ')[0]}<small>{data.isOwner?'Club owner':data.isAdmin?'Club admin':'Club member'}</small></span></button>:<a className="secondary-btn" href={signInUrl} onClick={e=>{e.currentTarget.href=authLink()}} target="_top"><LogIn size={15}/>Sign in</a>}</div></header><main className="content" key={view}>
     {error&&<div className="banner error" role="alert"><span>{error}</span><button className="secondary-btn" onClick={()=>refresh()}>Retry</button></div>}
     {!loading&&!error&&!data.initialized&&identity&&modal!=='setup'&&<div className="banner"><span>Welcome, organiser. Set up your club, then add the three squads.</span><button className="primary-btn" onClick={()=>setModal('setup')}>Set up club<ArrowRight/></button></div>}
     {!loading&&data.initialized&&!identity&&<div className="banner guest-banner"><span><strong>Winter league is here.</strong> Sign in to open your player profile and club stats.</span><SignIn/></div>}
@@ -135,7 +150,7 @@ export default function ClubApp({identity,signInUrl}:{identity:{name:string}|nul
   <Dialog open={!!selectedPlayer} onOpenChange={v=>{if(!v)closePlayer()}}><DialogContent className="dialog-panel wide"><DialogHeader><DialogTitle>Player profile</DialogTitle><DialogDescription>Season statistics · HRSC–Prithvi</DialogDescription></DialogHeader>{selectedPlayer&&<ProfileStats p={selectedPlayer} data={data} refresh={refresh} confirm={setConfirm}/>}</DialogContent></Dialog>
   {data.isAdmin&&view==='matchdays'&&day&&isReady(day)&&editingRound&&day.rounds.some(r=>r.id===editingRound.id)&&<EditRoundDialog key={editingRound.id} day={day} round={editingRound} players={data.players} busy={busy} action={action} onClose={()=>setEditingRound(null)}/>}
   <AlertDialog open={!!confirm} onOpenChange={v=>!v&&setConfirm(null)}><AlertDialogContent className="dialog-panel"><AlertDialogHeader><AlertDialogTitle>{confirm?.title}</AlertDialogTitle><AlertDialogDescription>{confirm?.description}</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction disabled={busy} onClick={()=>{confirm?.action();setConfirm(null)}}>Confirm</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog><Toaster position="bottom-right" richColors/>
-  </SidebarProvider></LinksCtx.Provider></TeamsCtx.Provider>
+  </SidebarProvider></UnsavedCtx.Provider></LinksCtx.Provider></TeamsCtx.Provider>
 }
 
 function SetupForm({keyValue,name,busy,onSave}:{keyValue:string;name:string;busy:boolean;onSave:(b:Record<string,unknown>)=>void}){const teamInfo=useContext(TeamsCtx);const [key,setKey]=useState(keyValue),[n,setN]=useState(name.includes('@')?'':name),[team,setTeam]=useState<Team>('red');return <form className="form-stack" onSubmit={e=>{e.preventDefault();onSave({key,name:n,team})}}><label className="field">Organiser setup code<input type="password" required value={key} onChange={e=>setKey(e.target.value)} autoComplete="off"/></label><label className="field">Your player name<input required maxLength={60} value={n} onChange={e=>setN(e.target.value)}/></label><label className="field">Your team<Picker label="Your team" value={team} onChange={v=>setTeam(v as Team)} options={teamOptions(teamInfo)}/></label><button disabled={busy} className="primary-btn">{busy?'Creating club…':'Set up my club'}<ArrowRight/></button></form>}
@@ -282,13 +297,13 @@ function Leaders({players,kind='goals'}:{players:PlayerLine[];kind?:'goals'|'ass
 // The player card: season stats and highlights, with a link to the player's team.
 function ProfileStats({p,data,refresh,confirm}:{p:Player;data:PublicClub;refresh:()=>Promise<PublicClub|null>;confirm:Confirm}){const s=playerStats([p],data.days)[0];return <><div className="profile-top"><Avatar p={p} size="xl"/><div><span className="eyebrow"><TeamLink team={p.team}/> · {p.position}</span><h2>{p.name}<BirthdayCake p={p}/></h2><div className="profile-meta"><span>{ageFrom(p.birthYear,p.birthMonth,clubToday())??'—'} years</span><span>{p.height??'—'} cm</span><span><MapPin className="inline mr-1" size={14}/>{p.district||'District not set'}</span></div></div></div><div className="metric-strip">{[[s.attended,'Matchdays'],[s.played,'Games played'],[s.wins,'Games won'],[s.goals,'Goals scored'],[s.assists,'Assists']].map(([v,l])=><div className="metric" key={l}><div><span className="metric-label">{l}</span><strong><AnimatedNumber value={Number(v)}/></strong></div></div>)}</div><p className="help"></p><HighlightGallery player={p} editable={data.isAdmin&&p.active!==false} canRemove={data.isAdmin} onUpdate={refresh} confirm={confirm}/></>}
 function PlayerCard({p}:{p:PlayerLine}){const teamInfo=useContext(TeamsCtx),open=useContext(LinksCtx);return <article className="player-card" data-team={p.team} style={teamVars(teamInfo[p.team])}><button className="player-cover w-full" onClick={()=>open.player(p.id)} aria-label={'View '+p.name}><span className="player-number">{teamInfo[p.team].letter}</span><Avatar p={p} size="lg"/></button><div className="player-info"><h3>{p.name}<BirthdayCake p={p}/></h3><div className="position">{teamInfo[p.team].name} · {p.position}{ageLabel(p)}</div><div className="player-card-stats"><div><strong>{p.attended}</strong><span>MATCHDAYS</span></div><div><strong>{p.wins}</strong><span>WINS</span></div><div><strong>{p.goals}</strong><span>GOALS</span></div><div><strong>{p.assists}</strong><span>ASSISTS</span></div></div></div><div className="player-actions"><button className="text-btn" onClick={()=>open.player(p.id)}>Player profile<ArrowUpRight/></button></div></article>}
-type TeamSection='squad'|'stats'|'board';
-const TEAM_SECTIONS:Record<TeamSection,[string,typeof Users]>={squad:['Squad',Users],stats:['Stats',Trophy],board:['Board',MessagesSquare]};
-// One team's page: its header, then Squad, Stats and, for its own players and admins, its private Board. Admins manage the team from the strip above.
+type TeamSection='squad'|'stats'|'board'|'formation';
+const TEAM_SECTIONS:Record<TeamSection,[string,typeof Users]>={squad:['Squad',Users],stats:['Stats',Trophy],board:['Board',MessagesSquare],formation:['Formation',Shirt]};
+// One team's page: its header, then Squad, Stats and, for its own players and admins, its private Board and Formation. Admins manage the team from the strip above.
 function TeamPage({data,team,requested,players,table,season,scope,member,busy,action,confirm,onSection,onEditTeam,onAddPlayer,onEditPlayer,onInvite,onToggleAdmin}:{data:PublicClub;team:Team;requested?:string;players:PlayerLine[];table:ReturnType<typeof teamStats>;season:ReturnType<typeof teamStats>;scope:ReactNode;member:boolean;busy:boolean;action:Action;confirm:Confirm;onSection:(section:TeamSection)=>void;onEditTeam:()=>void;onAddPlayer:()=>void;onEditPlayer:(p:Player)=>void;onInvite:(p:Player)=>void;onToggleAdmin:(p:Player)=>void}){
   const teamInfo=useContext(TeamsCtx),info=teamInfo[team],me=data.players.find(p=>p.id===data.me);
-  // The API also refuses a board to anyone but its team's players and admins.
-  const sections:TeamSection[]=member&&(data.isAdmin||me?.team===team)?['squad','stats','board']:['squad','stats'];
+  // The API also refuses a board or formation to anyone but its team's players and admins.
+  const sections:TeamSection[]=member&&(data.isAdmin||me?.team===team)?['squad','stats','board','formation']:['squad','stats'];
   const section=sections.find(s=>s===requested)??'squad';
   const record=season.find(s=>s.team===team)!,stats=table.find(s=>s.team===team)!,position=tablePosition(season,team),squad=players.filter(p=>p.team===team);
   return <div className="rise">
@@ -301,6 +316,7 @@ function TeamPage({data,team,requested,players,table,season,scope,member,busy,ac
       <div className="metric-strip">{[[stats.played,'PLAYED'],[stats.points,'POINTS'],[stats.wins+'–'+stats.draws+'–'+stats.losses,'W–D–L'],[stats.gf,'GOALS FOR'],[stats.ga,'GOALS AGAINST'],[(stats.gd>0?'+':'')+stats.gd,'GOAL DIFFERENCE']].map(([v,l])=><div className="metric" key={l}><div><span className="metric-label">{l}</span><strong>{v}</strong></div></div>)}</div>
       <div className="two-columns"><div className="panel"><div className="panel-head"><h2>Top scorers</h2><Goal size={20}/></div><Leaders players={squad}/></div><div className="panel"><div className="panel-head"><h2>Playmakers</h2><Target size={20}/></div><Leaders players={squad} kind="assists"/></div><div className="panel"><div className="panel-head"><h2>Most matchdays</h2><CalendarDays size={20}/></div><Leaders players={squad} kind="attended"/></div></div></>}
     {section==='board'&&<TeamBoard data={data} team={team} confirm={confirm}/>}
+    {section==='formation'&&<TeamFormation data={data} team={team} confirm={confirm}/>}
   </div>
 }
 const ORDINAL=new Intl.PluralRules('en-CA',{type:'ordinal'}),SUFFIX:Record<string,string>={one:'st',two:'nd',few:'rd',other:'th'};
@@ -559,3 +575,84 @@ function BoardComposer({comment=false,onPost}:{comment?:boolean;onPost:(body:str
       <button className="primary-btn" disabled={busy||!body.trim()}>{busy?'Sending…':comment?'Comment':'Post'}<Send/></button></div>
   </form>
 }
+// Formation builder: a team's saved line-ups of up to ten players on a vertical pitch. Its players and admins edit
+// them and the last save wins. Changes stay on this device until Save.
+type FormationDraft={name:string;slots:FormationSlot[]};
+const draftOf=({name,slots}:Formation):FormationDraft=>({name,slots});
+const sameDraft=(a:FormationDraft,b:FormationDraft)=>JSON.stringify(a)===JSON.stringify(b);
+async function formationRequest(body:Record<string,unknown>){const r=await fetch('/api/formation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json() as {id?:string;error?:string};if(!r.ok)throw new Error(j.error||'The formation could not be saved. Please try again.');return j}
+function TeamFormation({data,team,confirm}:{data:PublicClub;team:Team;confirm:Confirm}){
+  const teamInfo=useContext(TeamsCtx),markUnsaved=useContext(UnsavedCtx),info=teamInfo[team];
+  const [formations,setFormations]=useState<Formation[]|null>(null),[failed,setFailed]=useState(''),[selectedId,setSelectedId]=useState(''),[draft,setDraft]=useState<FormationDraft|null>(null);
+  const [picked,setPicked]=useState(''),[dragging,setDragging]=useState(''),[naming,setNaming]=useState<'new'|'rename'|null>(null),[nameValue,setNameValue]=useState(''),[guest,setGuest]=useState(''),[busy,setBusy]=useState(false);
+  const pitch=useRef<HTMLDivElement>(null),field=useRef<HTMLDivElement>(null);
+  const saved=formations?.find(f=>f.id===selectedId),dirty=!!saved&&!!draft&&!sameDraft(draft,draftOf(saved));
+  const squad=data.players.filter(p=>p.team===team&&p.active!==false),selected=draft?.slots.find(s=>s.id===picked);
+  // While there are unsaved changes, leaving within the app asks first and closing the tab asks through the browser.
+  useEffect(()=>{markUnsaved(dirty);if(!dirty)return;const warn=(e:BeforeUnloadEvent)=>e.preventDefault();window.addEventListener('beforeunload',warn);return ()=>{window.removeEventListener('beforeunload',warn);markUnsaved(false)}},[dirty,markUnsaved]);
+  async function fetchFormations(){const r=await fetch('/api/formation?team='+team,{cache:'no-store'});const j=await r.json() as {formations?:Formation[];error?:string};if(!r.ok||!j.formations)throw new Error(j.error||'The formations could not load.');return j.formations}
+  // Shows the saved formations, opening `select` if it is still there, else the newest. Any unsaved changes are dropped.
+  function show(list:Formation[],select:string){const chosen=list.find(f=>f.id===select)??list[0];setFormations(list);setSelectedId(chosen?.id??'');setDraft(chosen?draftOf(chosen):null);setPicked('');setFailed('')}
+  const load=(select:string)=>fetchFormations().then(list=>show(list,select));
+  const firstLoad=()=>fetchFormations().then(list=>show(list,''),(e:Error)=>setFailed(e.message));
+  useEffect(()=>{void firstLoad()},[]); // eslint-disable-line react-hooks/exhaustive-deps -- the team page remounts for each team
+  const player=(s:FormationSlot)=>s.playerId&&!s.former?data.players.find(p=>p.id===s.playerId):undefined;
+  const nameOf=(s:FormationSlot)=>s.label??player(s)?.name??'Former player';
+  const setSlots=(change:(slots:FormationSlot[])=>FormationSlot[])=>setDraft(d=>d&&{...d,slots:change(d.slots)});
+  const move=(id:string,to:{x:number;y:number})=>setSlots(slots=>slots.map(s=>s.id===id?{...s,...to}:s));
+  const add=(who:{playerId:string}|{label:string})=>setSlots(slots=>addSlot(slots,who,crypto.randomUUID()));
+  // Switching to another formation drops unsaved changes, so it asks first.
+  function leaveDraft(then:()=>void){if(dirty)confirm({title:'Leave without saving?',description:'Your changes to '+draft?.name+' have not been saved and will be lost.',action:then});else then()}
+  function choose(id:string){leaveDraft(()=>{const f=formations?.find(x=>x.id===id);if(f){setSelectedId(f.id);setDraft(draftOf(f));setPicked('')}})}
+  async function act(run:()=>Promise<void>){setBusy(true);try{await run()}catch(e){toast.error((e as Error).message)}finally{setBusy(false)}}
+  const save=()=>act(async()=>{if(!saved||!draft)return;await formationRequest({action:'save',id:saved.id,name:draft.name,slots:draft.slots.map(({id,playerId,label,x,y})=>({id,playerId,label,x,y}))});toast.success('Formation saved.');await load(saved.id)});
+  function submitName(){const name=nameValue.trim();if(!name)return;if(naming==='rename'){setDraft(d=>d&&{...d,name});setNaming(null);return}
+    void act(async()=>{const {id}=await formationRequest({action:'create',team,name});setNaming(null);toast.success('Formation created.');await load(id??'')})}
+  function remove(){if(saved)confirm({title:'Delete '+saved.name+'?',description:'It is removed for the whole team. This cannot be undone.',action:()=>void act(async()=>{await formationRequest({action:'delete',id:saved.id});toast.success('Formation deleted.');await load('')})})}
+  // Shares the PNG where the device can, otherwise downloads it.
+  const shareImage=()=>act(async()=>{if(!draft||!pitch.current)return;
+    const blob=await formationImage(pitch.current,info.name,draft.name,draft.slots.map(s=>{const name=nameOf(s),photo=player(s)?.photo;return {name,initials:initials(name),photo:photo?'/api/photo?key='+encodeURIComponent(photo):null,x:s.x,y:s.y}}));
+    const file=new File([blob],shareFileName(team,draft.name),{type:'image/png'});
+    if(navigator.canShare?.({files:[file]}))try{await navigator.share({files:[file],title:draft.name});return}catch(e){if((e as Error).name==='AbortError')return}
+    const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=file.name;link.click();URL.revokeObjectURL(url)});
+  if(!formations)return failed?<div className="banner error" role="alert"><span>{failed}</span><button type="button" className="secondary-btn" onClick={()=>void firstLoad()}>Retry</button></div>
+    :<div className="banner" role="status"><span className="flex gap-2 items-center"><Loader2 className="animate-spin" size={16}/>Loading formations…</span></div>;
+  const full=formations.length>=FORMATION_LIMITS.formations,room=!!draft&&canAdd(draft.slots);
+  return <div className="formation">
+    <div className="formation-toolbar">
+      {formations.length>0&&<Picker label="Formation" className="formation-picker" value={selectedId} onChange={choose} options={formations.map(f=>({value:f.id,label:f.name}))}/>}
+      <button type="button" className="secondary-btn" disabled={busy||full} title={full?`A team can keep up to ${FORMATION_LIMITS.formations} formations.`:undefined} onClick={()=>leaveDraft(()=>{setNameValue('');setNaming('new')})}><Plus/>New</button>
+      {draft&&<><button type="button" className="secondary-btn" disabled={busy} onClick={()=>{setNameValue(draft.name);setNaming('rename')}}><Pencil/>Rename</button><button type="button" className="secondary-btn remove-btn" disabled={busy} onClick={remove}><Trash2/>Delete</button></>}
+    </div>
+    {!draft?<div className="panel"><NoData title="No formations yet">Start one with New, then add up to {FORMATION_LIMITS.slots} players and drag them into place.</NoData></div>
+    :<div className="formation-layout">
+      <div className="formation-pitch" ref={pitch} style={teamVars(info)}><PitchLines/>
+        <div className="formation-field" ref={field}>{draft.slots.map(s=>{const name=nameOf(s),p=player(s);return <button type="button" key={s.id} className="formation-marker" aria-pressed={picked===s.id} aria-label={name} aria-describedby="formation-help" data-former={s.former||undefined} data-dragging={dragging===s.id||undefined} style={{left:s.x*100+'%',top:s.y*100+'%'}}
+          onPointerDown={e=>{e.currentTarget.setPointerCapture(e.pointerId);setDragging(s.id);setPicked(s.id)}}
+          onPointerMove={e=>{if(dragging===s.id&&field.current)move(s.id,pointerSpot(e.clientX,e.clientY,field.current.getBoundingClientRect()))}}
+          onPointerUp={()=>setDragging('')} onPointerCancel={()=>setDragging('')} onFocus={()=>setPicked(s.id)}
+          onKeyDown={e=>{const to=nudge(s,e.key);if(to){e.preventDefault();move(s.id,to)}}}>
+          {p?<Avatar p={p}/>:<span className="avatar">{initials(name)}</span>}<span className="formation-name">{name}</span></button>})}</div>
+      </div>
+      <div className="formation-side">
+        <p className="help" id="formation-help">Drag players into place, or select one and move it with the arrow keys.</p>
+        {selected&&<div className="formation-selected"><span>Selected: <strong>{nameOf(selected)}</strong></span><button type="button" className="secondary-btn remove-btn" onClick={()=>{setSlots(slots=>removeSlot(slots,selected.id));setPicked('')}}><UserMinus/>Remove</button></div>}
+        <section className="panel formation-add"><div className="panel-head"><h2>Add a player</h2><span className="help">{draft.slots.length} of {FORMATION_LIMITS.slots}</span></div>
+          <div className="field">From the squad<Picker label="Choose a squad player" disabled={!room||!unplaced(squad,draft.slots).length} value="" onChange={id=>add({playerId:id})} options={unplaced(squad,draft.slots).map(p=>({value:p.id,label:p.name}))}/></div>
+          <form className="formation-guest" onSubmit={e=>{e.preventDefault();add({label:guest});setGuest('')}}><label className="field">Or a placeholder name<input value={guest} maxLength={FORMATION_LIMITS.label} disabled={!room} placeholder="Guest striker" onChange={e=>setGuest(e.target.value)}/></label><button className="secondary-btn" disabled={!room||!guest.trim()}><Plus/>Add</button></form>
+          {!room&&<p className="help">The pitch is full. Remove a player to add another.</p>}
+        </section>
+        <div className="formation-actions"><button type="button" className="primary-btn" disabled={busy||!dirty} onClick={()=>void save()}><Save/>{busy?'Working…':'Save'}</button>{dirty&&<span className="formation-unsaved" role="status">Unsaved changes</span>}<button type="button" className="secondary-btn" disabled={busy} onClick={()=>void shareImage()}><Share2/>Share image</button></div>
+        {saved&&<p className="help">Last saved by <PlayerLink id={saved.updatedBy} players={data.players} fallback="a former player"/> {postedAgo(saved.updatedAt)}.</p>}
+      </div>
+    </div>}
+    <Dialog open={!!naming} onOpenChange={v=>{if(!v&&!busy)setNaming(null)}}><DialogContent className="dialog-panel"><DialogHeader><DialogTitle>{naming==='new'?'New formation':'Rename formation'}</DialogTitle><DialogDescription>{naming==='new'?'Name it so your team recognises it, like Sunday 3-2-1.':'The new name is kept when you save.'}</DialogDescription></DialogHeader>
+      <form className="form-stack" onSubmit={e=>{e.preventDefault();submitName()}}><label className="field">Name<input value={nameValue} maxLength={FORMATION_LIMITS.name} required onChange={e=>setNameValue(e.target.value)}/></label><button className="primary-btn" disabled={busy||!nameValue.trim()}>{naming==='new'?'Create':'Rename'}</button></form></DialogContent></Dialog>
+  </div>
+}
+const PITCH_BOX=`${-PITCH.margin} ${-PITCH.margin} ${PITCH.width+2*PITCH.margin} ${PITCH.length+2*PITCH.margin}`;
+function PitchLines(){return <svg className="formation-lines" viewBox={PITCH_BOX} aria-hidden="true">
+  {PITCH_MARKINGS.rects.map(([x,y,width,height])=><rect key={`${x},${y}`} x={x} y={y} width={width} height={height}/>)}
+  {PITCH_MARKINGS.lines.map(([x1,y1,x2,y2])=><line key={`${x1},${y1}`} x1={x1} y1={y1} x2={x2} y2={y2}/>)}
+  {PITCH_MARKINGS.circles.map(([cx,cy,r])=><circle key={`${cx},${cy}`} cx={cx} cy={cy} r={r}/>)}
+  {PITCH_MARKINGS.spots.map(([cx,cy])=><circle key={`${cx},${cy}`} className="spot" cx={cx} cy={cy} r={0.5}/>)}</svg>}
