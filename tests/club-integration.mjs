@@ -103,6 +103,9 @@ try{
   ok((await post('profile',personal,'black-user',beforeProfile.revision)).status===409,'stale profile save cannot overwrite newer records');
   const legacy=await mf.dispatchFetch(origin+'/?view=vote&day=legacy',{redirect:'manual'});
   ok(legacy.status>=300&&legacy.status<400&&legacy.headers.get('location')==='/winterleague?view=vote&day=legacy','old voting links redirect to the league');
+  // The website's links point at the app's current pages.
+  const site=await (await mf.dispatchFetch(origin+'/')).text();
+  ok(site.includes('href="/winterleague?view=teams&amp;team=red"')&&site.includes('href="/winterleague?view=teams"')&&site.includes('href="/winterleague?view=matchdays&amp;tab=vote"')&&!/view=(players|vote|board|guide|admin)\b/.test(site),'website links use the current addresses');
   for(const query of ['team=red','tab=log','player=p1']){const r=await mf.dispatchFetch(origin+'/?'+query,{redirect:'manual'});ok(r.status>=300&&r.status<400&&r.headers.get('location')==='/winterleague?'+query,'site links with '+query+' redirect to the league')}
   const date='2026-09-06',roster=[owner.id,red.id,black.id,white.id];
   const created=await success('addDays',{from:date,start:'07:00',end:'08:30'});
@@ -278,13 +281,20 @@ try{
   // URL routing: every address parses to one page state and builds back to the same address.
   const routes=(await libModule('lib/routes.ts',{'./club':club.url})).module;
   const parsed=search=>JSON.stringify(routes.parseRoute(search));
-  for(const route of [{view:'overview'},{view:'matchdays',day:'d1'},{view:'vote',day:'d1'},{view:'gameday',day:'d1'},{view:'admin',day:'d1',tab:'results'},{view:'admin',tab:'log'},{view:'players',team:'red'},{view:'standings',player:'p1'},{view:'players',team:'white',player:'p2'},{view:'board'},{view:'profile'},{view:'guide'}])
+  for(const route of [{view:'overview'},{view:'matchdays',day:'d1'},{view:'matchdays',day:'d1',tab:'vote'},{view:'matchdays',tab:'live'},{view:'matchdays',day:'d1',tab:'results'},{view:'profile',tab:'admin'},{view:'profile',tab:'guide'},{view:'teams'},{view:'teams',team:'red'},{view:'teams',tab:'board',team:'black'},{view:'teams',tab:'stats',team:'red'},{view:'standings',player:'p1'},{view:'teams',team:'white',player:'p2'},{view:'profile'}])
     ok(parsed(routes.routeSearch(route))===JSON.stringify(route),'route round trip '+JSON.stringify(route));
-  ok(routes.routeSearch({view:'overview'})===''&&routes.routeSearch({view:'vote',day:'d 1'})==='?view=vote&day=d+1','home has a bare address; values are encoded');
-  ok(parsed('?view=vote&day=legacy')===JSON.stringify({view:'vote',day:'legacy'}),'shared vote links keep their day');
-  ok(parsed('?team=black')===JSON.stringify({view:'players',team:'black'}),'a team on its own opens that squad');
-  ok(parsed('?view=players&team=purple')===JSON.stringify({view:'players'})&&parsed('?view=nowhere&day=x')===JSON.stringify({view:'overview'}),'unknown teams and pages fall back');
-  ok(parsed('?view=admin&tab=bogus')===JSON.stringify({view:'admin'})&&parsed('?view=standings&day=x&tab=log&team=red')===JSON.stringify({view:'standings'}),'parameters a page does not use are dropped');
+  ok(routes.routeSearch({view:'overview'})===''&&routes.routeSearch({view:'matchdays',day:'d 1',tab:'vote'})==='?view=matchdays&day=d+1&tab=vote','home has a bare address; values are encoded');
+  ok(parsed('?view=vote&day=legacy')===JSON.stringify({view:'matchdays',day:'legacy',tab:'vote'})&&parsed('?view=vote')===JSON.stringify({view:'matchdays',tab:'vote'}),'shared vote links open that day\'s vote');
+  ok(parsed('?view=gameday&day=d2')===JSON.stringify({view:'matchdays',day:'d2',tab:'live'}),'Gameday links open the live section');
+  ok(parsed('?view=admin&tab=results&day=d3')===JSON.stringify({view:'matchdays',day:'d3'}),'Match control links open the matchday page');
+  ok(parsed('?view=admin&tab=roster')===JSON.stringify({view:'teams'}),'Squad manager links open the team pages');
+  ok(parsed('?view=admin')===JSON.stringify({view:'profile',tab:'admin'})&&parsed('?view=admin&tab=log')===JSON.stringify({view:'profile',tab:'admin'}),'Control room links open Club admin under Me');
+  ok(parsed('?view=guide')===JSON.stringify({view:'profile',tab:'guide'}),'Club guide links open the guide under Me');
+  ok(parsed('?team=black')===JSON.stringify({view:'teams',team:'black'}),'a team on its own opens that team');
+  ok(parsed('?view=players&team=white')===JSON.stringify({view:'teams',team:'white'})&&parsed('?view=players')===JSON.stringify({view:'teams'}),'Players links open the team pages');
+  ok(parsed('?view=board')===JSON.stringify({view:'teams',tab:'board'}),'Team board links open the board section');
+  ok(parsed('?view=teams&team=purple')===JSON.stringify({view:'teams'})&&parsed('?view=nowhere&day=x')===JSON.stringify({view:'overview'}),'unknown teams and pages fall back');
+  ok(parsed('?view=profile&tab=bogus&day=d1')===JSON.stringify({view:'profile'})&&parsed('?view=matchdays&tab=log')===JSON.stringify({view:'matchdays'})&&parsed('?view=standings&day=x&tab=log&team=red')===JSON.stringify({view:'standings'}),'parameters a page does not use are dropped');
   ok(parsed('?player=p9&invite_error=1')===JSON.stringify({view:'overview',player:'p9'}),'a player card opens over any page; other parameters are ignored');
   ok(model.embedVideo('https://youtu.be/dQw4w9WgXcQ')==='https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ'&&!model.isVideoUrl('http://youtube.com/x')&&model.isVideoUrl('https://vimeo.com/1')&&model.weeklyDates('2026-09-13','2026-11-29').length===12,'video links and weekly dates');
   const played=(id,roster)=>({id,date:'2026-09-06',start:'07:00',end:'08:30',roster,opening:['red','black'],firstExit:'red',poll:'ready',rounds:[{id:'r',a:'red',b:'black',scoreA:0,scoreB:0,goals:[],lineup:[],exit:'red',winner:null}]});
@@ -295,6 +305,16 @@ try{
   const archive=model.pastMatchdays([onDate('sep06','2026-09-06'),onDate('sep20','2026-09-20'),onDate('sep13','2026-09-13'),onDate('today','2026-10-08'),onDate('future','2026-10-15')],'2026-10-08').map(d=>d.id);
   ok(JSON.stringify(archive)==='["sep20","sep13","sep06"]','past matchdays list days before today, newest first');
   ok(model.pastMatchdays([onDate('empty','2026-09-06',0)],'2026-10-08').length===0,'past matchdays skip days with no rounds');
+  // Matchday page: which sections show, which one it opens on, and the date strip.
+  const md=(date,poll='ready',ready=true)=>({...played('x',[]),date,poll,rounds:[],...(ready?{}:{opening:null,firstExit:null})});
+  const sections=(day,admin)=>model.matchdaySections(day,'2026-10-08',admin).join();
+  ok(sections(md('2026-10-08'),false)==='results,vote'&&sections(md('2026-10-08'),true)==='results,live,vote'&&sections(md('2026-10-01'),true)==='results,live,vote'&&sections(md('2026-10-15'),true)==='results,vote','Live is for admins, from the day itself on');
+  const opens=(day,admin)=>model.defaultSection(day,'2026-10-08',admin);
+  ok(opens(md('2026-10-08'),true)==='live'&&opens(md('2026-10-08','open'),true)==='live'&&opens(md('2026-10-08','closed'),true)==='results','admins open on Live during the session');
+  ok(opens(md('2026-10-08','open'),false)==='vote'&&opens(md('2026-10-01','open'),true)==='vote'&&opens(md('2026-10-08'),false)==='results'&&opens(md('2026-10-08','closed'),false)==='results'&&opens(md('2026-10-15'),true)==='results','Vote while voting is open, otherwise Results');
+  const strip=model.dateStrip([{...md('2026-10-15'),id:'next'},{...md('2026-10-08'),id:'today'},{...md('2026-09-20'),id:'old'},{...md('2026-10-01','closed'),id:'last'}],'2026-10-08');
+  ok(strip.map(s=>s.day.id+':'+s.when).join()==='old:past,last:past,today:today,next:upcoming','date strip runs from past days through today to upcoming days');
+  ok(strip.filter(s=>s.live).map(s=>s.day.id).join()==='today'&&!model.dateStrip([md('2026-10-08','closed')],'2026-10-08')[0].live&&!model.dateStrip([md('2026-10-08','ready',false)],'2026-10-08')[0].live,'only today\'s set-up, unclosed session shows as live');
   ok(JSON.stringify(model.awardWinners([{candidate:'a',votes:3},{candidate:'b',votes:3},{candidate:'c',votes:1}]).map(w=>w.candidate))==='["a","b"]'&&model.awardWinners([]).length===0,'player of the day is everyone tied on the most votes');
   const squad=[{id:'r1',team:'red'},{id:'w1',team:'white'}];
   ok(JSON.stringify(model.teamsWithout(squad.map(p=>p.id),squad))==='["black"]'&&JSON.stringify(model.teamsWithout(['r1'],squad))==='["black","white"]'&&model.teamsWithout(['r1','w1','b1'],[...squad,{id:'b1',team:'black'}]).length===0,'matchday setup names the teams with nobody attending');
@@ -317,6 +337,16 @@ try{
   ok(model.ageFrom(2000,5,'2026-05-01')===26&&model.ageFrom(2000,6,'2026-05-31')===25&&model.ageFrom(2000,12,'2026-11-30')===25&&model.ageFrom(2000,12,'2026-12-01')===26&&model.ageFrom(2000,1,'2027-01-15')===27&&model.ageFrom(null,null,'2026-05-01')===null&&model.ageFrom(2000,null,'2026-05-01')===null,'age counts whole years from birth year and month');
   ok(model.isBirthMonth({birthYear:2000,birthMonth:12},'2026-12-31')&&!model.isBirthMonth({birthYear:2000,birthMonth:1},'2026-12-31')&&model.isBirthMonth({birthYear:2000,birthMonth:1},'2027-01-01')&&!model.isBirthMonth({birthYear:null,birthMonth:null},'2026-12-01')&&!model.isBirthMonth({},'2026-12-01'),'birthday month spans the month boundary correctly');
   ok(model.teamInk('#171918')==='#fffef9'&&model.teamInk('#eceddf')==='#173322'&&model.teamInk('#ff666b')==='#173322','crest text picks the more legible ink');
+  // Home: the next matchday's one button, and who took the last matchday.
+  const home=(poll,date,ready=true,rounds=0)=>model.homeAction({...played('h',[]),date,poll,rounds:played('h',[]).rounds.slice(0,rounds),...(ready?{}:{opening:null,firstExit:null})},'2026-10-08');
+  ok(home('open','2026-10-08')==='vote'&&home('open','2026-10-01')==='vote','Vote now while voting is open');
+  ok(home('ready','2026-10-08')==='live'&&home('ready','2026-10-08',false)==='preview'&&home('closed','2026-10-08')==='results','Follow it live during today\'s set-up session');
+  ok(home('ready','2026-10-15',false)==='preview'&&home('ready','2026-10-01',true,1)==='results'&&home('closed','2026-10-01')==='results','See results once a day is played, a preview before');
+  ok(model.dayWinners({...played('w',[]),rounds:[game('red','black',2,0),game('red','white',0,0)]}).join()==='red'&&model.dayWinners({...played('w',[]),rounds:[game('red','black',1,1)]}).join()==='red,black'&&model.dayWinners({...played('w',[]),rounds:[]}).length===0,'the day goes to the top of that day\'s table; level teams share it');
+  // Table position: tied teams share a place; a team yet to play has none.
+  const ranked=model.teamStats([{...played('t2',[]),rounds:[game('red','black',1,1),game('black','white',2,0)]}]);
+  ok(model.tablePosition(ranked,'black')===1&&model.tablePosition(ranked,'red')===2&&model.tablePosition(ranked,'white')===3,'table position follows the ranking');
+  ok(model.tablePosition(model.teamStats([{...played('t3',[]),rounds:[game('red','black',1,1)]}]),'black')===1&&model.tablePosition(model.teamStats([{...played('t3',[]),rounds:[game('red','black',1,1)]}]),'red')===1&&model.tablePosition(model.teamStats([]),'red')===null,'tied teams share a place; unplayed teams have none');
   const t=model.teamStats(state.days),p=model.playerStats(state.players,state.days);
   ok(t.find(x=>x.team==='red').wins===1&&t.find(x=>x.team==='black').wins===1,'team wins derived correctly');
   ok(p.find(x=>x.id===owner.id).goals===2&&p.find(x=>x.id===red.id).assists===1&&p.find(x=>x.id===red.id).played===1,'goals assists and selective appearances correct');
