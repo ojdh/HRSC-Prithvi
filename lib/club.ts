@@ -97,14 +97,15 @@ export function playerStats(players:Player[],days:Day[]){
 }
 // Players who kept goal: games in goal and the goals their team conceded in them, ranked by goals conceded per game
 // (fewest first), then by more games in goal. A keeper qualifies for the table after keeping goal in at least half
-// the games their team played over the same days.
+// the games played over the same days by the teams they kept goal for; keptFor is the team of their latest game in goal.
 export function keeperStats(players:Player[],days:Day[]){
-  const kept=new Map<string,{games:number;conceded:number}>();
-  for(const d of days)for(const r of d.rounds)for(const [team,id] of Object.entries(r.keepers??{}) as [Team,string][]){
-    const line=kept.get(id)??{games:0,conceded:0};line.games++;line.conceded+=team===r.a?r.scoreB:r.scoreA;kept.set(id,line);
+  const kept=new Map<string,{games:number;conceded:number;teams:Set<Team>;keptFor:Team}>();
+  for(const d of [...days].sort((a,b)=>a.date.localeCompare(b.date)))for(const r of d.rounds)for(const [team,id] of Object.entries(r.keepers??{}) as [Team,string][]){
+    const line=kept.get(id)??{games:0,conceded:0,teams:new Set<Team>(),keptFor:team};line.games++;line.conceded+=team===r.a?r.scoreB:r.scoreA;line.teams.add(team);line.keptFor=team;kept.set(id,line);
   }
-  const teamGames=Object.fromEntries(teamStats(days).map(s=>[s.team,s.played])) as Record<Team,number>;
-  return players.flatMap(p=>{const line=kept.get(p.id);return line?[{...p,...line,perGame:line.conceded/line.games,teamGames:teamGames[p.team],qualified:line.games*2>=teamGames[p.team]}]:[];})
+  const played=Object.fromEntries(teamStats(days).map(s=>[s.team,s.played])) as Record<Team,number>;
+  return players.flatMap(p=>{const line=kept.get(p.id);if(!line)return [];const {teams,...rest}=line,teamGames=[...teams].reduce((n,t)=>n+played[t],0);
+    return [{...p,...rest,perGame:line.conceded/line.games,teamGames,qualified:line.games*2>=teamGames}];})
     .sort((a,b)=>a.perGame-b.perGame||b.games-a.games||a.name.localeCompare(b.name));
 }
 // The keepers a new game starts with: each team's keeper from the last game it played, if that game had one.
