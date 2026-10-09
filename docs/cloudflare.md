@@ -36,7 +36,7 @@ Think of the website as the club's **clubhouse**.
 - **Cloudflare is the building.** We used to rent a room in someone else's building (ChatGPT Sites). Now the club has its own building with its own street address, `prithvifc.ca`, and we hold the keys.
 - **The front lobby is open.** Anyone can walk into the lobby, which is the homepage, and see what the club is about.
 - **Access is the doorman.** To go past the lobby into the league rooms, the doorman checks your name against a guest list (the "Club members" group). If you're on it, he emails you a one-time code. You type it in and you're in. You don't need to remember a password.
-- **D1 is the filing cabinet.** It holds the roster, match results, votes and team board posts.
+- **D1 is the filing cabinet.** It holds the roster, match results, votes, team board posts and team formations.
 - **R2 is the storage locker with a meter.** Photos (profile, team and team board photos) and video clips go here. The locker is free up to a point. Past that, it starts charging.
 - **The guardrail stops the meter.** Before anything goes into or comes out of the locker, the website checks a tally. If the next item would go over the free amount, it says "not this month" instead. Nobody gets a surprise bill.
 

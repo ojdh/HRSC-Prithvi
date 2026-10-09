@@ -16,11 +16,16 @@ export async function boardViewer(user: { userId: string } | null) {
   return { ...stored, me: me?.active !== false ? me : undefined, admin };
 }
 
+// A team's private spaces (its board, its formations) open to its own players and, where admins are let in, to admins.
+export function openTeamSpace(viewer: BoardViewer, team: unknown, admins: boolean, missing: string, refused: string): Team {
+  check(TEAMS.includes(team as Team), missing);
+  check(viewer.me?.team === team || (viewer.admin && admins), refused, 403);
+  return team as Team;
+}
+
 // Admins can read and moderate any board, but only a team's own players post, comment and react on it.
 export function openTeam(viewer: BoardViewer, team: unknown, takePart = false): Team {
-  check(TEAMS.includes(team as Team), 'Team board not found.');
-  check(viewer.me?.team === team || (viewer.admin && !takePart), takePart && viewer.admin ? 'Only this team’s players can post on its board.' : 'This board belongs to another team.', 403);
-  return team as Team;
+  return openTeamSpace(viewer, team, !takePart, 'Team board not found.', takePart && viewer.admin ? 'Only this team’s players can post on its board.' : 'This board belongs to another team.');
 }
 
 // Newest first. The cursor is the last post's created_at and id, so paging stays stable when posts are added or removed.

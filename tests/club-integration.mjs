@@ -281,7 +281,7 @@ try{
   // URL routing: every address parses to one page state and builds back to the same address.
   const routes=(await libModule('lib/routes.ts',{'./club':club.url})).module;
   const parsed=search=>JSON.stringify(routes.parseRoute(search));
-  for(const route of [{view:'overview'},{view:'matchdays',day:'d1'},{view:'matchdays',day:'d1',tab:'vote'},{view:'matchdays',tab:'live'},{view:'matchdays',day:'d1',tab:'results'},{view:'profile',tab:'admin'},{view:'profile',tab:'guide'},{view:'teams'},{view:'teams',team:'red'},{view:'teams',tab:'board',team:'black'},{view:'teams',tab:'stats',team:'red'},{view:'standings',player:'p1'},{view:'teams',team:'white',player:'p2'},{view:'profile'}])
+  for(const route of [{view:'overview'},{view:'matchdays',day:'d1'},{view:'matchdays',day:'d1',tab:'vote'},{view:'matchdays',tab:'live'},{view:'matchdays',day:'d1',tab:'results'},{view:'profile',tab:'admin'},{view:'profile',tab:'guide'},{view:'teams'},{view:'teams',team:'red'},{view:'teams',tab:'board',team:'black'},{view:'teams',tab:'stats',team:'red'},{view:'teams',tab:'formation',team:'white'},{view:'standings',player:'p1'},{view:'teams',team:'white',player:'p2'},{view:'profile'}])
     ok(parsed(routes.routeSearch(route))===JSON.stringify(route),'route round trip '+JSON.stringify(route));
   ok(routes.routeSearch({view:'overview'})===''&&routes.routeSearch({view:'matchdays',day:'d 1',tab:'vote'})==='?view=matchdays&day=d+1&tab=vote','home has a bare address; values are encoded');
   ok(parsed('?view=vote&day=legacy')===JSON.stringify({view:'matchdays',day:'legacy',tab:'vote'})&&parsed('?view=vote')===JSON.stringify({view:'matchdays',tab:'vote'}),'shared vote links open that day\'s vote');
@@ -293,6 +293,25 @@ try{
   ok(parsed('?team=black')===JSON.stringify({view:'teams',team:'black'}),'a team on its own opens that team');
   ok(parsed('?view=players&team=white')===JSON.stringify({view:'teams',team:'white'})&&parsed('?view=players')===JSON.stringify({view:'teams'}),'Players links open the team pages');
   ok(parsed('?view=board')===JSON.stringify({view:'teams',tab:'board'}),'Team board links open the board section');
+  // Formation builder: positions are pitch fractions, clamped and rounded so the layout is the same at every size.
+  const formation=(await libModule('lib/formation.ts')).module;
+  ok(formation.pitchFraction(-0.2)===0&&formation.pitchFraction(1.7)===1&&formation.pitchFraction(0.12345)===0.123&&formation.pitchFraction(0.9996)===1,'pitch positions are clamped to the pitch and rounded to 3 decimals');
+  const rect={left:100,top:50,width:200,height:400};
+  ok(JSON.stringify(formation.pointerSpot(200,250,rect))==='{"x":0.5,"y":0.5}'&&JSON.stringify(formation.pointerSpot(0,999,rect))==='{"x":0,"y":1}','a dragged marker lands where the pointer is, kept on the pitch');
+  ok(JSON.stringify(formation.nudge({x:0.5,y:0.5},'ArrowLeft'))==='{"x":0.48,"y":0.5}'&&JSON.stringify(formation.nudge({x:0.5,y:0.01},'ArrowUp'))==='{"x":0.5,"y":0}'&&formation.nudge({x:0.5,y:0.5},'Enter')===null,'arrow keys move a marker a step and stay on the pitch; other keys do nothing');
+  const keeper=formation.addSlot([],{playerId:'p1'},'s1');
+  ok(keeper.length===1&&keeper[0].playerId==='p1'&&keeper[0].label===null&&keeper[0].x===formation.SPOTS[0][0]&&keeper[0].y===formation.SPOTS[0][1],'the first player goes in the first default spot');
+  const withGuest=formation.addSlot(keeper,{label:'  Guest striker  '},'s2');
+  ok(withGuest.length===2&&withGuest[1].label==='Guest striker'&&withGuest[1].playerId===null&&withGuest[1].x===formation.SPOTS[1][0],'a placeholder name is trimmed and takes the next free spot');
+  ok(formation.addSlot(keeper,{playerId:'p1'},'s3')===keeper,'a player already on the pitch cannot be added twice');
+  ok(formation.addSlot(keeper,{label:'   '},'s3')===keeper&&formation.addSlot(keeper,{label:'x'.repeat(31)},'s3')===keeper,'placeholder names must be 1 to 30 characters');
+  let full=[];for(let i=0;i<10;i++)full=formation.addSlot(full,{label:'P'+i},'f'+i);
+  ok(full.length===10&&!formation.canAdd(full)&&formation.addSlot(full,{label:'Eleventh'},'f10')===full,'a formation holds at most 10 players');
+  const gap=formation.removeSlot(withGuest,'s1');
+  ok(gap.length===1&&gap[0].id==='s2'&&formation.addSlot(gap,{playerId:'p2'},'s4')[1].x===formation.SPOTS[0][0],'removing a player frees their default spot for the next one');
+  ok(formation.unplaced([{id:'p1'},{id:'p2'}],keeper).map(p=>p.id).join()==='p2','the squad picker hides players already placed');
+  ok(formation.shareFileName('red','Sunday 2-3-1: Press!')==='formation-red-sunday-2-3-1-press.png'&&formation.shareFileName('black','¡¡')==='formation-black.png','the shared image is named after the team and formation');
+  ok(formation.initials('Ram Bahadur Thapa')==='RB'&&formation.initials('  guest ')==='G'&&formation.initials('')==='?','markers show up to two initials');
   ok(parsed('?view=teams&team=purple')===JSON.stringify({view:'teams'})&&parsed('?view=nowhere&day=x')===JSON.stringify({view:'overview'}),'unknown teams and pages fall back');
   ok(parsed('?view=profile&tab=bogus&day=d1')===JSON.stringify({view:'profile'})&&parsed('?view=matchdays&tab=log')===JSON.stringify({view:'matchdays'})&&parsed('?view=standings&day=x&tab=log&team=red')===JSON.stringify({view:'standings'}),'parameters a page does not use are dropped');
   ok(parsed('?player=p9&invite_error=1')===JSON.stringify({view:'overview',player:'p9'}),'a player card opens over any page; other parameters are ignored');
@@ -725,6 +744,68 @@ try{
     ok((await boardTight.dispatchFetch(origin+'/api/board/image?key='+encodeURIComponent(key),{headers:await headers('tight-black')})).status===403&&await used('class_b')===0,'a refused board photo view costs no R2 operation');
     ok((await boardTight.dispatchFetch(origin+'/api/board/image?key='+encodeURIComponent(key),{headers:await headers('owner')})).status===200,'the one budgeted board photo view still fits');
   }finally{await boardTight.dispose()}
+  // Team formations: private to the team and admins; the team's players and every admin edit them, and the last save wins.
+  const formations=new Miniflare({...workerOptions,bindings:{...accessBindings,...budget({storage:1e9,classA:1e6,classB:1e7})}});
+  try{
+    // Arrange: two red players, one black player, a white admin and an archived red player
+    await setUp(formations);
+    const redId=await linkMember(formations,'Form red','red','form-red'),red2Id=await linkMember(formations,'Form red two','red','form-red2');
+    const blackId=await linkMember(formations,'Form black','black','form-black');
+    await clubCall(formations,'setAdmin',{playerId:await linkMember(formations,'Form white','white','form-white'),admin:true});
+    const goneId=await linkMember(formations,'Form gone','red','form-gone');await clubCall(formations,'archivePlayer',{playerId:goneId});
+    const readFormations=async(user,team)=>{const r=await formations.dispatchFetch(origin+'/api/formation?team='+team,{headers:user?await headers(user):{}});return {status:r.status,data:await r.json()}};
+    const formationSend=async(user,body,extra={})=>{const r=await formations.dispatchFetch(origin+'/api/formation',{method:'POST',headers:{...await headers(user),...extra},body:JSON.stringify(body)});return {status:r.status,data:await r.json()}};
+    const slot=(id,who,x=0.5,y=0.5)=>({id,playerId:null,label:null,x,y,...who});
+    const formationRows=async()=>(await (await formations.getD1Database('DB')).prepare('SELECT COUNT(*) AS n FROM formations').first('n'));
+    // Act and assert: a team player creates, saves, reads back and deletes a formation
+    const created=await formationSend('form-red',{action:'create',team:'red',name:'  Sunday 2-3-1  ',slots:[slot('a',{playerId:redId},0.12345,0.9),slot('b',{label:' Guest '},0.5,0.25)]});
+    ok(created.status===200&&typeof created.data.id==='string','a team player creates a formation: '+JSON.stringify(created));
+    let listed=await readFormations('form-red2','red'),saved=listed.data.formations?.[0];
+    ok(listed.status===200&&listed.data.formations.length===1&&saved.id===created.data.id&&saved.name==='Sunday 2-3-1'&&saved.updatedBy===redId,'a teammate reads the formation');
+    ok(JSON.stringify(saved.slots)===JSON.stringify([{id:'a',playerId:redId,label:null,x:0.123,y:0.9},{id:'b',playerId:null,label:'Guest',x:0.5,y:0.25}]),'slots come back trimmed, rounded and in order: '+JSON.stringify(saved.slots));
+    const moved=await formationSend('form-red2',{action:'save',id:saved.id,name:'Sunday press',slots:[slot('a',{playerId:redId},0.2,0.8),slot('c',{playerId:red2Id},0.7,0.3)]});
+    ok(moved.status===200,'a teammate saves changes: '+JSON.stringify(moved));
+    for(let read=0;read<2;read++){saved=(await readFormations('form-red','red')).data.formations[0];
+      ok(saved.name==='Sunday press'&&saved.updatedBy===red2Id&&saved.slots.length===2&&saved.slots[1].playerId===red2Id&&saved.slots[0].x===0.2,'the saved formation persists across reads')}
+    ok((await formationSend('form-red',{action:'delete',id:saved.id})).status===200&&(await readFormations('form-red','red')).data.formations.length===0,'a team player deletes a formation');
+    // Who can read and edit
+    const redPlan=(await formationSend('form-red',{action:'create',team:'red',name:'Red plan'})).data.id;
+    ok((await readFormations('form-black','red')).status===403,'another team’s formations are private');
+    ok((await formationSend('form-black',{action:'save',id:redPlan,name:'Hijack',slots:[]})).status===403&&(await formationSend('form-black',{action:'create',team:'red',name:'Hijack'})).status===403&&(await formationSend('form-black',{action:'delete',id:redPlan})).status===403,'players cannot change another team’s formations');
+    ok((await Promise.all(['red','black','white'].map(t=>readFormations('form-white',t)))).every(r=>r.status===200),'admins read every team’s formations');
+    ok((await formationSend('form-white',{action:'save',id:redPlan,name:'Admin plan',slots:[slot('a',{playerId:redId})]})).status===200&&(await readFormations('form-red','red')).data.formations[0].name==='Admin plan','an admin saves another team’s formation');
+    ok((await formationSend('owner',{action:'create',team:'black',name:'Owner plan',slots:[slot('a',{playerId:blackId})]})).status===200,'the owner creates a formation for any team');
+    ok((await readFormations(null,'red')).status===401&&(await formationSend(null,{action:'create',team:'red',name:'Anon'})).status===401,'formations need sign-in');
+    ok((await readFormations('form-gone','red')).status===403&&(await formationSend('form-gone',{action:'create',team:'red',name:'Gone'})).status===403,'archived players lose their team’s formations');
+    ok((await readFormations('intruder','red')).status===403,'non-members cannot read formations');
+    ok((await readFormations('owner','purple')).status===400,'unknown team rejected');
+    ok((await formationSend('form-red',{action:'create',team:'red',name:'Cross-site'},{Origin:'https://evil.test'})).status===403,'formation changes must come from the club website');
+    ok((await formationSend('form-red',{action:'save',id:crypto.randomUUID(),name:'Missing',slots:[]})).status===404,'saving a deleted formation is refused');
+    // Validation: every refused save leaves the stored formation unchanged
+    const refused=async(slots,why,name='Valid name')=>{const r=await formationSend('form-red',{action:'save',id:redPlan,name,slots});ok(r.status===400,why+': '+JSON.stringify(r))};
+    await refused(Array.from({length:11},(_,i)=>slot('s'+i,{label:'P'+i})),'a formation holds at most 10 players');
+    for(const [x,y] of [[1.5,0.5],[0.5,-0.1],['0.5',0.5],[null,0.5],[0.5,undefined]])await refused([{id:'a',playerId:null,label:'Guest',x,y}],'positions must be numbers on the pitch: '+x+','+y);
+    await refused([slot('a',{playerId:blackId})],'a player from another team');
+    await refused([slot('a',{playerId:redId}),slot('b',{playerId:redId})],'the same player twice');
+    await refused([slot('a',{playerId:goneId})],'an archived player cannot be added');
+    await refused([slot('a',{label:'   '})],'an empty placeholder name');
+    await refused([slot('a',{label:'x'.repeat(31)})],'a placeholder name over 30 characters');
+    await refused([slot('a',{playerId:redId,label:'Both'})],'a slot is a squad player or a placeholder, not both');
+    await refused([slot('a',{label:'One'}),slot('a',{label:'Two'})],'slot ids are unique');
+    await refused([],'an empty name','   ');
+    await refused([],'a name over 40 characters','x'.repeat(41));
+    ok((await readFormations('form-red','red')).data.formations.find(f=>f.id===redPlan).name==='Admin plan','refused saves change nothing');
+    for(let i=(await readFormations('form-red','red')).data.formations.length;i<10;i++)ok((await formationSend('form-red',{action:'create',team:'red',name:'Plan '+i})).status===200,'formation '+(i+1)+' fits');
+    const before=await formationRows();
+    ok((await formationSend('form-red',{action:'create',team:'red',name:'Eleventh'})).status===400&&await formationRows()===before,'a team keeps at most 10 formations');
+    // A player who leaves the team stays in the stored formation, shown as a former player, until someone edits that slot
+    await formationSend('form-red',{action:'save',id:redPlan,name:'With teammate',slots:[slot('a',{playerId:redId}),slot('b',{playerId:red2Id},0.3,0.3)]});
+    await clubCall(formations,'archivePlayer',{playerId:red2Id});
+    const kept=(await readFormations('form-red','red')).data.formations.find(f=>f.id===redPlan).slots;
+    ok(kept.length===2&&kept[1].playerId===red2Id&&kept[1].former===true&&!kept[0].former,'an archived player reads back as a former player: '+JSON.stringify(kept));
+    ok((await formationSend('form-red',{action:'save',id:redPlan,name:'Moved',slots:[slot('a',{playerId:redId},0.4,0.4),slot('b',{playerId:red2Id},0.6,0.6)]})).status===200,'a formation keeping its former player can still be saved');
+    await refused([slot('a',{playerId:redId}),slot('b',{playerId:red2Id}),slot('c',{playerId:goneId})],'a former player not already in the formation cannot be added');
+  }finally{await formations.dispose()}
   // Data migrations upgrade a club saved before them.
   const oldClub=new Miniflare({...workerOptions,bindings:accessBindings});
   try{

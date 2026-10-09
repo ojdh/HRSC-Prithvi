@@ -18,3 +18,5 @@ export const boardComments = sqliteTable('board_comments',{id:text('id').primary
 export const boardReactions = sqliteTable('board_reactions',{targetId:text('target_id').notNull(),player:text('player').notNull(),emoji:text('emoji').notNull()},t=>[primaryKey({columns:[t.targetId,t.player,t.emoji]})]);
 // Every R2 object a board post or comment holds; cleanupStorage counts these keys as referenced.
 export const boardImages = sqliteTable('board_images',{key:text('key').primaryKey(),team:text('team').notNull(),postId:text('post_id').notNull(),commentId:text('comment_id'),createdAt:integer('created_at').notNull()},t=>[index('idx_board_images_post').on(t.postId)]);
+// Team formations: slots is the JSON list of markers (lib/formation.ts). updated_by is a player id and updated_at is unix milliseconds.
+export const formations = sqliteTable('formations',{id:text('id').primaryKey(),team:text('team').notNull(),name:text('name').notNull(),slots:text('slots').notNull(),updatedBy:text('updated_by').notNull(),updatedAt:integer('updated_at').notNull()},t=>[index('idx_formations_team').on(t.team,t.updatedAt)]);
