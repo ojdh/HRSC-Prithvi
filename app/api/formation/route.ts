@@ -6,7 +6,7 @@ import { boardViewer } from '@/lib/server-board';
 import { findFormation, formationName, formationSlots, listFormations, openFormations } from '@/lib/server-formations';
 export const dynamic = 'force-dynamic';
 
-// Ten slots with their ids, names and positions fit well inside this.
+// Ten slots with their ids, names, positions and arrows fit well inside this.
 const MAX_REQUEST_BYTES = 8_000;
 
 export async function GET(req: Request) {

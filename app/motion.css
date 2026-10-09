@@ -58,4 +58,26 @@ body{background:radial-gradient(ellipse at 95% 2%,#c5ead59c,transparent 45%),rad
 .formation-add{display:grid;gap:14px}.formation-add .panel-head{margin:0}.formation-add .panel-head h2{font-size:20px}.formation-add [data-slot=select-trigger]{width:100%;height:45px;background:var(--card)}
 .formation-guest{display:flex;gap:8px;align-items:flex-end}.formation-guest .field{flex:1;min-width:0}
 .formation-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}.formation-unsaved{font-size:13px;font-weight:700;color:var(--destructive)}
-@media(max-width:767px){.formation-layout{grid-template-columns:1fr}.formation-picker{flex:1 1 100%}.formation-marker{--disc:36px}.formation-marker .avatar{font-size:13px}.formation-name{font-size:10px;max-width:72px;padding:1px 5px}}
+/* Movement arrows. The pitch is the same grass in every theme, so these colours are fixed: a light green and a light red,
+   each over a dark casing so it reads on the grass. Defence is also dashed, so the two differ without colour. They are on :root
+   because the marker menu and the legend sit outside the pitch; the shared image reads them too. Widths are in pitch metres. */
+:root{--run-attack:#a6f06a;--run-defend:#ff6f61;--run-casing:#0e2416d9}
+.formation-stage{display:grid;gap:10px;align-content:start;min-width:0}.formation-stage .formation-aim{margin:0;padding:8px 8px 8px 14px}
+.formation-pitch{-webkit-touch-callout:none}.formation-pitch[data-aiming]{cursor:crosshair}.formation-pitch[data-aiming] .formation-marker{cursor:crosshair}
+.run-art [data-kind=attack]{--run:var(--run-attack)}.run-art [data-kind=defend]{--run:var(--run-defend)}
+.run-art line{fill:none;stroke-linecap:butt}.run-art .casing{stroke:var(--run-casing);stroke-width:var(--casing-width,1)}.run-art .run{stroke:var(--run);stroke-width:var(--run-width,.55)}
+.run-art [data-kind=defend] line{stroke-dasharray:var(--run-dash,1.6 1.1)}
+.run-art polygon{fill:var(--run);stroke:var(--run-casing);stroke-width:.45;stroke-linejoin:round;paint-order:stroke}
+.formation-runs{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}.formation-runs [data-preview]{opacity:.8}
+.formation-run-head{position:absolute;width:28px;height:28px;transform:translate(-50%,-50%);border:0;border-radius:50%;padding:0;background:none;touch-action:none;cursor:grab}
+.formation-run-head[data-dragging]{cursor:grabbing}.formation-run-head:focus-visible{outline:2px solid var(--pitch-line);outline-offset:1px}
+.formation-hold{position:absolute;left:50%;top:-5px;width:calc(var(--disc) + 10px);height:calc(var(--disc) + 10px);transform:translateX(-50%) rotate(-90deg);pointer-events:none}
+.formation-hold circle{fill:none;stroke:var(--pitch-line);stroke-width:3;stroke-dasharray:100;stroke-dashoffset:100;animation:formation-hold linear forwards}
+@keyframes formation-hold{to{stroke-dashoffset:0}}
+.formation-menu-anchor{position:absolute;width:44px;height:44px;transform:translate(-50%,-50%);pointer-events:none}
+.formation-menu{min-width:200px}
+.formation-swatch{--casing-width:4.5;--run-width:2.5;--run-dash:4 2.5;width:24px;height:8px;flex-shrink:0;overflow:visible}
+.formation-legend{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.formation-chip{display:inline-flex;align-items:center;gap:8px;min-height:36px;padding:6px 14px;border:1px solid var(--border);border-radius:999px;background:var(--card);font-size:13px;font-weight:700;cursor:pointer}
+.formation-chip[aria-pressed=false]{opacity:.6;text-decoration:line-through}.formation-chip:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+@media(max-width:767px){.formation-layout{grid-template-columns:1fr}.formation-picker{flex:1 1 100%}.formation-marker{--disc:36px}.formation-marker .avatar{font-size:13px}.formation-name{font-size:10px;max-width:72px;padding:1px 5px}.formation-menu-anchor{width:36px;height:36px}}
