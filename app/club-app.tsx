@@ -229,7 +229,7 @@ function Voting({data,day,busy,action,identity,signIn,share,onProfile,confirm}:{
 }
 
 const SECTION_ICONS={results:Flag,live:Timer,vote:Vote};
-// One page per matchday: pick a date on the strip, then read its Results, run it Live (admins) or Vote. Admins manage the day from the strip above the sections.
+// One page per matchday: pick a date on the strip, then run it Live (admins), Vote or read its Results. Admins manage the day from the strip above the sections.
 function MatchdayPage({data,day,requested,today,identity,busy,action,refresh,confirm,signIn,onDay,onSection,onModal,onEditRound,onShare,onDeleted,onProfile}:{data:PublicClub;day?:Day;requested?:string;today:string;identity:boolean;busy:boolean;action:Action;refresh:()=>Promise<PublicClub|null>;confirm:Confirm;signIn:ReactNode;onDay:(id:string)=>void;onSection:(section:MatchdaySection)=>void;onModal:(modal:'setupDay'|'editDay')=>void;onEditRound:(round:Round)=>void;onShare:(day:Day)=>void;onDeleted:()=>void;onProfile:()=>void}){
   const strip=dateStrip(data.days,today),live=!!strip.find(s=>s.day.id===day?.id)?.live;
   const sections=day?matchdaySections(day,today,data.isAdmin):[];
