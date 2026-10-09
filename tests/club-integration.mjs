@@ -278,14 +278,17 @@ try{
   // URL routing: every address parses to one page state and builds back to the same address.
   const routes=(await libModule('lib/routes.ts',{'./club':club.url})).module;
   const parsed=search=>JSON.stringify(routes.parseRoute(search));
-  for(const route of [{view:'overview'},{view:'matchdays',day:'d1'},{view:'matchdays',day:'d1',tab:'vote'},{view:'matchdays',tab:'live'},{view:'matchdays',day:'d1',tab:'results'},{view:'admin',tab:'log'},{view:'players',team:'red'},{view:'standings',player:'p1'},{view:'players',team:'white',player:'p2'},{view:'board'},{view:'profile'},{view:'guide'}])
+  for(const route of [{view:'overview'},{view:'matchdays',day:'d1'},{view:'matchdays',day:'d1',tab:'vote'},{view:'matchdays',tab:'live'},{view:'matchdays',day:'d1',tab:'results'},{view:'admin',tab:'log'},{view:'teams'},{view:'teams',team:'red'},{view:'teams',tab:'board',team:'black'},{view:'teams',tab:'stats',team:'red'},{view:'standings',player:'p1'},{view:'teams',team:'white',player:'p2'},{view:'profile'},{view:'guide'}])
     ok(parsed(routes.routeSearch(route))===JSON.stringify(route),'route round trip '+JSON.stringify(route));
   ok(routes.routeSearch({view:'overview'})===''&&routes.routeSearch({view:'matchdays',day:'d 1',tab:'vote'})==='?view=matchdays&day=d+1&tab=vote','home has a bare address; values are encoded');
   ok(parsed('?view=vote&day=legacy')===JSON.stringify({view:'matchdays',day:'legacy',tab:'vote'})&&parsed('?view=vote')===JSON.stringify({view:'matchdays',tab:'vote'}),'shared vote links open that day\'s vote');
   ok(parsed('?view=gameday&day=d2')===JSON.stringify({view:'matchdays',day:'d2',tab:'live'}),'Gameday links open the live section');
-  ok(parsed('?view=admin&tab=results&day=d3')===JSON.stringify({view:'matchdays',day:'d3'})&&parsed('?view=admin&tab=roster')===JSON.stringify({view:'admin',tab:'roster'}),'Match control links open the matchday page');
-  ok(parsed('?team=black')===JSON.stringify({view:'players',team:'black'}),'a team on its own opens that squad');
-  ok(parsed('?view=players&team=purple')===JSON.stringify({view:'players'})&&parsed('?view=nowhere&day=x')===JSON.stringify({view:'overview'}),'unknown teams and pages fall back');
+  ok(parsed('?view=admin&tab=results&day=d3')===JSON.stringify({view:'matchdays',day:'d3'}),'Match control links open the matchday page');
+  ok(parsed('?view=admin&tab=roster')===JSON.stringify({view:'teams'})&&parsed('?view=admin&tab=log')===JSON.stringify({view:'admin',tab:'log'}),'Squad manager links open the team pages');
+  ok(parsed('?team=black')===JSON.stringify({view:'teams',team:'black'}),'a team on its own opens that team');
+  ok(parsed('?view=players&team=white')===JSON.stringify({view:'teams',team:'white'})&&parsed('?view=players')===JSON.stringify({view:'teams'}),'Players links open the team pages');
+  ok(parsed('?view=board')===JSON.stringify({view:'teams',tab:'board'}),'Team board links open the board section');
+  ok(parsed('?view=teams&team=purple')===JSON.stringify({view:'teams'})&&parsed('?view=nowhere&day=x')===JSON.stringify({view:'overview'}),'unknown teams and pages fall back');
   ok(parsed('?view=admin&tab=bogus&day=d1')===JSON.stringify({view:'admin'})&&parsed('?view=matchdays&tab=log')===JSON.stringify({view:'matchdays'})&&parsed('?view=standings&day=x&tab=log&team=red')===JSON.stringify({view:'standings'}),'parameters a page does not use are dropped');
   ok(parsed('?player=p9&invite_error=1')===JSON.stringify({view:'overview',player:'p9'}),'a player card opens over any page; other parameters are ignored');
   ok(model.embedVideo('https://youtu.be/dQw4w9WgXcQ')==='https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ'&&!model.isVideoUrl('http://youtube.com/x')&&model.isVideoUrl('https://vimeo.com/1')&&model.weeklyDates('2026-09-13','2026-11-29').length===12,'video links and weekly dates');
@@ -329,6 +332,10 @@ try{
   ok(model.ageFrom(2000,5,'2026-05-01')===26&&model.ageFrom(2000,6,'2026-05-31')===25&&model.ageFrom(2000,12,'2026-11-30')===25&&model.ageFrom(2000,12,'2026-12-01')===26&&model.ageFrom(2000,1,'2027-01-15')===27&&model.ageFrom(null,null,'2026-05-01')===null&&model.ageFrom(2000,null,'2026-05-01')===null,'age counts whole years from birth year and month');
   ok(model.isBirthMonth({birthYear:2000,birthMonth:12},'2026-12-31')&&!model.isBirthMonth({birthYear:2000,birthMonth:1},'2026-12-31')&&model.isBirthMonth({birthYear:2000,birthMonth:1},'2027-01-01')&&!model.isBirthMonth({birthYear:null,birthMonth:null},'2026-12-01')&&!model.isBirthMonth({},'2026-12-01'),'birthday month spans the month boundary correctly');
   ok(model.teamInk('#171918')==='#fffef9'&&model.teamInk('#eceddf')==='#173322'&&model.teamInk('#ff666b')==='#173322','crest text picks the more legible ink');
+  // Table position: tied teams share a place; a team yet to play has none.
+  const ranked=model.teamStats([{...played('t2',[]),rounds:[game('red','black',1,1),game('black','white',2,0)]}]);
+  ok(model.tablePosition(ranked,'black')===1&&model.tablePosition(ranked,'red')===2&&model.tablePosition(ranked,'white')===3,'table position follows the ranking');
+  ok(model.tablePosition(model.teamStats([{...played('t3',[]),rounds:[game('red','black',1,1)]}]),'black')===1&&model.tablePosition(model.teamStats([{...played('t3',[]),rounds:[game('red','black',1,1)]}]),'red')===1&&model.tablePosition(model.teamStats([]),'red')===null,'tied teams share a place; unplayed teams have none');
   const t=model.teamStats(state.days),p=model.playerStats(state.players,state.days);
   ok(t.find(x=>x.team==='red').wins===1&&t.find(x=>x.team==='black').wins===1,'team wins derived correctly');
   ok(p.find(x=>x.id===owner.id).goals===2&&p.find(x=>x.id===red.id).assists===1&&p.find(x=>x.id===red.id).played===1,'goals assists and selective appearances correct');

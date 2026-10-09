@@ -79,6 +79,8 @@ export function teamStats(days:Day[]){
   }
   return stats.sort((a,b)=>b.points-a.points||b.gd-a.gd||b.gf-a.gf);
 }
+// A team's place in a ranked table, shared by teams level on points, goal difference and goals; null before it has played.
+export function tablePosition(table:ReturnType<typeof teamStats>,team:Team){const s=table.find(x=>x.team===team);return s?.played?table.findIndex(x=>x.points===s.points&&x.gd===s.gd&&x.gf===s.gf)+1:null;}
 // attended counts played matchdays (at least one round) the player was marked attending; attendance is that share as a whole percent.
 export function playerStats(players:Player[],days:Day[]){
   const playedDays=days.filter(d=>d.rounds.length);
