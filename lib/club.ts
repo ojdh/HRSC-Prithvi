@@ -121,6 +121,11 @@ export function matchdaySections(day:Day,today:string,isAdmin:boolean):MatchdayS
 export function defaultSection(day:Day,today:string,isAdmin:boolean):MatchdaySection{return isAdmin&&day.date===today&&day.poll!=='closed'?'live':day.poll==='open'?'vote':'results';}
 // Every matchday oldest first, marked past, today or upcoming; live is today's set-up session before voting closes.
 export function dateStrip(days:Day[],today:string){return [...days].sort((a,b)=>a.date.localeCompare(b.date)).map(day=>({day,when:day.date<today?'past' as const:day.date===today?'today' as const:'upcoming' as const,live:day.date===today&&isReady(day)&&day.poll!=='closed'}));}
+// Home's one button for a matchday: Vote now while voting is open, Follow it live during today's set-up session,
+// See results once it is played, otherwise a preview of the day.
+export function homeAction(day:Day,today:string):'vote'|'live'|'results'|'preview'{return day.poll==='open'?'vote':day.date===today&&isReady(day)&&day.poll!=='closed'?'live':isPlayed(day)?'results':'preview';}
+// The teams at the top of a matchday's own table; level teams share the day.
+export function dayWinners(day:Day){const table=teamStats([day]);return table.filter(s=>tablePosition(table,s.team)===1).map(s=>s.team);}
 // Player of the day: everyone tied on the most votes. A closed poll's tally arrives sorted by votes, highest first.
 export function awardWinners(tally:{candidate:string;votes:number}[]){const max=tally[0]?.votes||0;return tally.filter(x=>x.votes===max);}
 export function timeLabel(day:Day){return clockLabel(day.start)+'–'+clockLabel(day.end);}
