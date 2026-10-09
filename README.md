@@ -104,7 +104,7 @@ Use Control room on the hosted site for routine score and roster updates. Source
 
 ## Homepage and routes
 
-The public club homepage is `/`. The existing member app is `/winterleague`. Older `/?view=...` links redirect while preserving parameters; legacy hash invitations and setup links are forwarded. Invitation cookies, accounts, APIs and storage remain unchanged. Teams link to filtered squads. Stock football images are editorial photographs, not pictures of club members; replace their source paths in `app/home-page.tsx` with your club photographs.
+The public club homepage is `/`. The existing member app is `/winterleague`. Older `/?view=...` links redirect while preserving parameters; legacy hash invitations and setup links are forwarded. Inside the app every page has its own address, built and read by `lib/routes.ts`: `view` (the page), `day`, `tab` (the section on the page), `team` and `player` (an open player card). Opening a page or a player card adds a browser history entry, so Back and Forward move between them, and links shared before a page moved are mapped to its current place. Invitation cookies, accounts, APIs and storage remain unchanged. Teams link to filtered squads. Stock football images are editorial photographs, not pictures of club members; replace their source paths in `app/home-page.tsx` with your club photographs.
 
 The future domain `prithvifc.ca` can use this same root and `/winterleague` structure once connected to hosting and DNS. It has not been registered or connected by this code change.
 

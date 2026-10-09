@@ -103,6 +103,7 @@ try{
   ok((await post('profile',personal,'black-user',beforeProfile.revision)).status===409,'stale profile save cannot overwrite newer records');
   const legacy=await mf.dispatchFetch(origin+'/?view=vote&day=legacy',{redirect:'manual'});
   ok(legacy.status>=300&&legacy.status<400&&legacy.headers.get('location')==='/winterleague?view=vote&day=legacy','old voting links redirect to the league');
+  for(const query of ['team=red','tab=log','player=p1']){const r=await mf.dispatchFetch(origin+'/?'+query,{redirect:'manual'});ok(r.status>=300&&r.status<400&&r.headers.get('location')==='/winterleague?'+query,'site links with '+query+' redirect to the league')}
   const date='2026-09-06',roster=[owner.id,red.id,black.id,white.id];
   const created=await success('addDays',{from:date,start:'07:00',end:'08:30'});
   ok(created.dayIds.length===1&&!created.skipped.length,'one-off match day scheduled');
@@ -270,7 +271,21 @@ try{
   ok(again.status===200,'player uploads a new photo');
   const secondPhoto=(await get()).data.players.find(p=>p.id===black.id).photo;
   ok(await removePhoto('owner',black.id)===200&&!(await photoBucket.head(secondPhoto))&&(await get()).data.players.find(p=>p.id===black.id).photo===null,'admin removes another player\'s photo');
-  const ts=require('typescript');const source=await readFile('lib/club.ts','utf8');const js=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ES2022,target:ts.ScriptTarget.ES2022}}).outputText;const model=await import('data:text/javascript;base64,'+Buffer.from(js).toString('base64'));
+  // lib modules load as data URLs, so a lib import of './club' is pointed at the loaded club module.
+  const ts=require('typescript');
+  async function libModule(file,deps={}){let js=ts.transpileModule(await readFile(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.ES2022,target:ts.ScriptTarget.ES2022}}).outputText;for(const [name,url] of Object.entries(deps))js=js.replaceAll(`from '${name}'`,`from '${url}'`);const url='data:text/javascript;base64,'+Buffer.from(js).toString('base64');return {url,module:await import(url)}}
+  const club=await libModule('lib/club.ts'),model=club.module;
+  // URL routing: every address parses to one page state and builds back to the same address.
+  const routes=(await libModule('lib/routes.ts',{'./club':club.url})).module;
+  const parsed=search=>JSON.stringify(routes.parseRoute(search));
+  for(const route of [{view:'overview'},{view:'matchdays',day:'d1'},{view:'vote',day:'d1'},{view:'gameday',day:'d1'},{view:'admin',day:'d1',tab:'results'},{view:'admin',tab:'log'},{view:'players',team:'red'},{view:'standings',player:'p1'},{view:'players',team:'white',player:'p2'},{view:'board'},{view:'profile'},{view:'guide'}])
+    ok(parsed(routes.routeSearch(route))===JSON.stringify(route),'route round trip '+JSON.stringify(route));
+  ok(routes.routeSearch({view:'overview'})===''&&routes.routeSearch({view:'vote',day:'d 1'})==='?view=vote&day=d+1','home has a bare address; values are encoded');
+  ok(parsed('?view=vote&day=legacy')===JSON.stringify({view:'vote',day:'legacy'}),'shared vote links keep their day');
+  ok(parsed('?team=black')===JSON.stringify({view:'players',team:'black'}),'a team on its own opens that squad');
+  ok(parsed('?view=players&team=purple')===JSON.stringify({view:'players'})&&parsed('?view=nowhere&day=x')===JSON.stringify({view:'overview'}),'unknown teams and pages fall back');
+  ok(parsed('?view=admin&tab=bogus')===JSON.stringify({view:'admin'})&&parsed('?view=standings&day=x&tab=log&team=red')===JSON.stringify({view:'standings'}),'parameters a page does not use are dropped');
+  ok(parsed('?player=p9&invite_error=1')===JSON.stringify({view:'overview',player:'p9'}),'a player card opens over any page; other parameters are ignored');
   ok(model.embedVideo('https://youtu.be/dQw4w9WgXcQ')==='https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ'&&!model.isVideoUrl('http://youtube.com/x')&&model.isVideoUrl('https://vimeo.com/1')&&model.weeklyDates('2026-09-13','2026-11-29').length===12,'video links and weekly dates');
   const played=(id,roster)=>({id,date:'2026-09-06',start:'07:00',end:'08:30',roster,opening:['red','black'],firstExit:'red',poll:'ready',rounds:[{id:'r',a:'red',b:'black',scoreA:0,scoreB:0,goals:[],lineup:[],exit:'red',winner:null}]});
   const [regular]=model.playerStats([{id:'p',name:'P',team:'red'}],[played('d1',[{id:'p',team:'red'}]),played('d2',[]),{...played('d3',[{id:'p',team:'red'}]),rounds:[]}]);
