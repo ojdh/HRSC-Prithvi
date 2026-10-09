@@ -8,12 +8,12 @@ import {deleteObject} from '@/lib/r2-budget';
 import {saveClubWithAccess,type AccessChange,type AccessResult} from '@/lib/access-sync';
 export const dynamic='force-dynamic';
 const team=z.enum(TEAMS),id=z.string().min(1).max(100);
-const date=z.string().refine(validDate,'Choose a real date on or after September 1, 2026.'),time=z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/,'Choose a valid time.');
+const date=z.string().refine(validDate,'Choose a real date.'),time=z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/,'Choose a valid time.');
 const slot=z.object({start:time,end:time}),endsAfterStart=[(v:{start:string;end:string})=>v.end>v.start,'The end time must be after the start time.'] as const;
 const videoUrl=z.string().trim().max(500).refine(v=>!v||isVideoUrl(v),'Use an HTTPS YouTube, Vimeo, or Google Drive video link.');
 const MAX_DAYS=300;
 const score=z.number().int().min(0).max(20);
-const roundInput=z.object({dayId:id,scoreA:score,scoreB:score,lineup:z.array(id).min(2),goals:z.array(z.object({team,scorer:id.nullable(),assist:id.nullable(),ownGoal:z.boolean()})).max(40)});
+const roundInput=z.object({dayId:id,scoreA:score,scoreB:score,lineup:z.array(id).min(2),goals:z.array(z.object({team,scorer:id.nullable(),assist:id.nullable(),ownGoal:z.boolean()})).max(40),keepers:z.record(team,id).default({})});
 const birthPair=[(v:{birthYear:number|null;birthMonth:number|null})=>(v.birthYear===null)===(v.birthMonth===null),'Choose both a birth year and month, or leave both empty.'] as const;
 // The latest allowed birth year follows the club calendar, so it is checked per request rather than fixed when the Worker starts.
 const birthYear=z.number().int().min(1940,'Choose a birth year from 1940 onwards.').refine(y=>y<=Number(clubToday().slice(0,4))-5,'Players must be at least five years old.');
@@ -143,13 +143,13 @@ export async function POST(req:Request){try{
       const input=roundInput.parse(body);
       const day=club.days.find(d=>d.id===input.dayId);check(day,'Match day not found.');check(isReady(day),'Set attendance and opening teams first.');const n=nextMatch(day);
       const lineup=playedLineup(day,n.a,n.b,input);
-      day.rounds.push({id:crypto.randomUUID(),a:n.a,b:n.b,scoreA:input.scoreA,scoreB:input.scoreB,lineup,goals:input.goals,...result(n.a,n.b,input.scoreA,input.scoreB,n.incumbent)});
+      day.rounds.push({id:crypto.randomUUID(),a:n.a,b:n.b,scoreA:input.scoreA,scoreB:input.scoreB,lineup,goals:input.goals,keepers:input.keepers,...result(n.a,n.b,input.scoreA,input.scoreB,n.incumbent)});
     }else if(action==='editRound'){
       const input=roundInput.extend({roundId:id}).parse(body);
       const day=club.days.find(d=>d.id===input.dayId);check(day&&isReady(day),'Match day not found.');
       const index=day.rounds.findIndex(r=>r.id===input.roundId);check(index>=0,'Round not found.');const round=day.rounds[index],before=snapshot(round);
       const lineup=playedLineup(day,round.a,round.b,input);
-      Object.assign(round,{scoreA:input.scoreA,scoreB:input.scoreB,lineup,goals:input.goals,...result(round.a,round.b,input.scoreA,input.scoreB,incumbentAt(day,index))});
+      Object.assign(round,{scoreA:input.scoreA,scoreB:input.scoreB,lineup,goals:input.goals,keepers:input.keepers,...result(round.a,round.b,input.scoreA,input.scoreB,incumbentAt(day,index))});
       record(club,actor(me),'editRound',day,{roundId:round.id,before,after:snapshot(round)});
     }else if(action==='undoRound'){
       const day=club.days.find(d=>d.id===body.dayId);check(day&&day.rounds.length,'There is no round to undo.');check(day.rounds.at(-1)?.id===body.roundId,'The latest round has changed. Refresh first.',409);
@@ -182,10 +182,11 @@ export async function POST(req:Request){try{
 }catch(e){return fail(e);}}
 function attendee(club:Club,playerId:string){const p=club.players.find(x=>x.id===playerId&&x.active!==false);check(p,'An active attending player is missing.');return {id:p.id,team:p.team};}
 function editableDay(club:Club,dayId:string,locked:string){const day=club.days.find(d=>d.id===dayId);check(day,'Match day not found.');check(day.poll==='ready'&&!day.rounds.length,locked);return day;}
-// Validates a game's lineup, goals and score for the two teams that played it, and returns the de-duplicated lineup.
+// Validates a game's lineup, keepers, goals and score for the two teams that played it, and returns the de-duplicated lineup.
 function playedLineup(day:Day,a:Team,b:Team,input:z.infer<typeof roundInput>){
   const lineup=[...new Set(input.lineup)];check(lineup.every(pid=>day.roster.some(p=>p.id===pid&&[a,b].includes(p.team))),'Only attending players on the two playing teams can appear.');
   check([a,b].every(t=>day.roster.some(p=>p.team===t&&lineup.includes(p.id))),'Include at least one player from each playing team.');
+  for(const [t,keeper] of Object.entries(input.keepers) as [Team,string][])check([a,b].includes(t)&&lineup.includes(keeper)&&day.roster.some(p=>p.id===keeper&&p.team===t),'Choose each goalkeeper from their own team’s players in this game.');
   check(input.goals.filter(g=>g.team===a).length===input.scoreA&&input.goals.filter(g=>g.team===b).length===input.scoreB&&input.goals.length===input.scoreA+input.scoreB,'Goal entries must match the score.');
   for(const g of input.goals){check([a,b].includes(g.team),'Invalid scoring team.');check(!g.ownGoal||!g.assist,'Own goals cannot have assists.');
     if(g.scorer){const p=day.roster.find(p=>p.id===g.scorer);check(p&&lineup.includes(p.id)&&(g.ownGoal?p.team!==g.team:p.team===g.team),'Choose a scorer who played for the correct team.');}

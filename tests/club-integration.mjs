@@ -206,8 +206,23 @@ try{
   const wednesday=(await success('addDays',{from:'2026-09-16',...slot})).dayIds[0];
   const overlap=await success('addDays',{from:'2026-09-09',to:'2026-09-23',start:'07:00',end:'08:30'});
   ok(overlap.dayIds.length===2&&JSON.stringify(overlap.skipped)===JSON.stringify(['2026-09-16']),'series skips dates that already have a match day');
-  for(const bad of [{from:'2026-09-01',to:'2027-09-07'},{from:'2026-12-01',start:'08:30',end:'08:30'},{from:'2026-02-30'},{from:'2026-08-30'},{from:'2026-12-08',to:'2026-12-01'},{from:'2026-09-16'}])ok((await post('addDays',{...slot,...bad})).status===400,'invalid schedule rejected: '+JSON.stringify(bad));
+  for(const bad of [{from:'2026-09-01',to:'2027-09-07'},{from:'2026-12-01',start:'08:30',end:'08:30'},{from:'2026-02-30'},{from:'2026-12-08',to:'2026-12-01'},{from:'2026-09-16'}])ok((await post('addDays',{...slot,...bad})).status===400,'invalid schedule rejected: '+JSON.stringify(bad));
   ok((await post('addDays',{from:'2026-12-08',...slot},'black-user')).status===403,'players cannot schedule match days');
+  // Goalkeepers: each team in a game can name one keeper from its own lineup; the season has no start-date floor.
+  const keeperDay=(await success('addDays',{from:'2026-08-30',...slot})).dayIds[0];
+  ok(keeperDay,'a matchday can be scheduled before September');
+  await success('setupDay',{dayId:keeperDay,roster,a:'red',b:'black',firstExit:'red'});
+  const keeperRound=keepers=>({dayId:keeperDay,scoreA:1,scoreB:0,lineup:[owner.id,red.id,black.id],goals:[goal('red',owner.id)],keepers});
+  ok((await post('addRound',keeperRound({red:white.id}))).status===400,'a keeper must be on that team');
+  ok((await post('addRound',keeperRound({white:white.id}))).status===400,'only the two playing teams have keepers');
+  ok((await post('addRound',{...keeperRound({red:red.id}),lineup:[owner.id,black.id]})).status===400,'a keeper must be in the game');
+  await success('addRound',keeperRound({red:red.id,black:black.id}));
+  let kept=(await get()).data.days.find(d=>d.id===keeperDay).rounds[0];
+  ok(kept.keepers.red===red.id&&kept.keepers.black===black.id,'each team\'s keeper is saved with the game');
+  await success('editRound',{...keeperRound({red:owner.id}),roundId:kept.id});
+  kept=(await get()).data.days.find(d=>d.id===keeperDay).rounds[0];
+  ok(JSON.stringify(kept.keepers)===JSON.stringify({red:owner.id}),'editing a game changes or clears its keepers');
+  await success('undoRound',{dayId:keeperDay,roundId:kept.id});await success('deleteDay',{dayId:keeperDay});
   ok((await post('editDay',{dayId:wednesday,date:'2026-09-13',...slot})).status===400,'edited date cannot clash');
   await success('editDay',{dayId:wednesday,date:'2026-09-17',start:'19:00',end:'20:00'});
   const moved=(await get()).data.days.find(d=>d.id===wednesday);ok(moved.date==='2026-09-17'&&moved.start==='19:00'&&moved.end==='20:00','match day moved to a new date and time');
@@ -365,6 +380,16 @@ try{
   const draft={...model.freshDraft(['p1','p2']),goals:[{team:'red',scorer:'p1',assist:null,ownGoal:false},{team:'black',scorer:'p1',assist:null,ownGoal:true},{team:'red',scorer:null,assist:null,ownGoal:false}]};
   const payload=model.roundPayload(draft,'red','black');
   ok(payload.scoreA===2&&payload.scoreB===1&&payload.goals.length===3&&JSON.stringify(payload.lineup)==='["p1","p2"]','round payload derives the score from goals');
+  ok(JSON.stringify(model.roundPayload(model.freshDraft(['p1'],{red:'p1'}),'red','black').keepers)==='{"red":"p1"}'&&JSON.stringify(model.freshDraft(['p1']).keepers)==='{}','a game\'s keepers go with its payload');
+  // Goalkeepers: goals conceded per game in goal, fewest first; the next game starts with each team's last keeper.
+  const kg=(a,b,scoreA,scoreB,keepers)=>({...game(a,b,scoreA,scoreB),keepers});
+  const keeperDays=[{...played('k1',[]),rounds:[kg('red','black',1,0,{red:'k1',black:'k2'}),kg('red','white',3,3,{red:'k1'}),game('white','black',2,2),kg('white','black',0,0,{black:'k3'})]},{...played('k2',[]),rounds:[kg('black','red',0,1,{black:'k2'})]}];
+  const gk=model.keeperStats([{id:'k1',name:'One',team:'red'},{id:'k2',name:'Two',team:'black'},{id:'k3',name:'Three',team:'black'},{id:'out',name:'Outfield',team:'white'}],keeperDays);
+  ok(gk.map(k=>k.id+':'+k.games+':'+k.conceded).join()==='k3:1:0,k2:2:2,k1:2:3'&&gk[1].perGame===1&&gk[2].perGame===1.5,'keepers rank by goals conceded per game, fewest first; outfielders are left out');
+  ok(gk.map(k=>k.id+':'+k.teamGames+':'+k.qualified).join()==='k3:4:false,k2:4:true,k1:3:true','a keeper qualifies for the table after keeping goal in at least half their team\'s games');
+  const transferred=model.keeperStats([{id:'m',name:'Mover',team:'white'}],[{...played('m',[]),rounds:[kg('red','black',0,1,{red:'m'}),kg('red','white',2,0,{red:'m'}),game('red','black',0,0),...Array.from({length:4},()=>game('white','black',1,1))]}]);
+  ok(transferred.map(k=>k.id+':'+k.teamGames+':'+k.qualified+':'+k.keptFor).join()==='m:3:true:red','a keeper who has since changed teams is measured against, and labelled with, the team they kept goal for');
+  ok(JSON.stringify(model.carriedKeepers(keeperDays[0].rounds,'red','black'))==='{"red":"k1","black":"k3"}'&&JSON.stringify(model.carriedKeepers(keeperDays[0].rounds.slice(0,2),'white','black'))==='{"black":"k2"}'&&JSON.stringify(model.carriedKeepers([],'red','black'))==='{}','a team keeps its keeper from its last game, unless that game had none');
   ok(model.gameClock({...draft,elapsed:60000,startedAt:1000},121000)===model.GAME_MS-180000&&model.gameClock({...draft,elapsed:60000,startedAt:null},999999)===model.GAME_MS-60000&&model.gameClock({...draft,elapsed:0,startedAt:0},model.GAME_MS*2)===0,'game clock counts down, pauses, and stops at zero');
   ok(model.draftKey('d1',3)!==model.draftKey('d1',4)&&model.draftKey('d1',3)!==model.draftKey('d2',3),'each game of each day has its own draft');
   // Ages come from birth year and month; the birthday counts as reached on the first of its month.

@@ -10,14 +10,16 @@ export type Highlight = {id:string;key:string;kind:'Goal'|'Assist'|'Save'|'Skill
 // email is admin-set on an unclaimed player; accessEmail is the email the app added to the club-members Access group.
 export type Player = {id:string;name:string;team:Team;birthYear?:number|null;birthMonth?:number|null;height:number|null;position:string;number?:number|null;district?:string|null;active?:boolean;photo:string|null;highlights?:Highlight[];userId?:string;inviteHash?:string;legacyInviteHash?:string;inviteToken?:string;linked?:boolean;email?:string|null;accessEmail?:string|null};
 export type Goal = {team:Team;scorer:string|null;assist:string|null;ownGoal:boolean};
-export type Round = {id:string;a:Team;b:Team;scoreA:number;scoreB:number;goals:Goal[];lineup:string[];exit:Team;winner:Team|null;videoUrl?:string|null};
+// Each playing team's goalkeeper for one game, by player id; games recorded before keepers existed have none.
+export type Keepers = Partial<Record<Team,string>>;
+export type Round = {id:string;a:Team;b:Team;scoreA:number;scoreB:number;goals:Goal[];lineup:string[];keepers?:Keepers;exit:Team;winner:Team|null;videoUrl?:string|null};
 // A scheduled day has an empty roster and no opening teams until it is set up on the day. start/end are club-local HH:MM.
 export type Day = {id:string;date:string;start:string;end:string;roster:{id:string;team:Team}[];opening:[Team,Team]|null;firstExit:Team|null;rounds:Round[];poll:'ready'|'open'|'closed';videoUrl?:string|null;videoKey?:string|null;deletion?:DayDeletion};
 // A request to delete a played matchday. approvals holds player ids; the requester's counts as the first.
 export type DayDeletion = {requestedBy:string;approvals:string[]};
 export const DELETION_APPROVALS=3;
-// A game as the edit log records it: the score and goals, without the lineup.
-export type RoundSnapshot = Pick<Round,'a'|'b'|'scoreA'|'scoreB'|'winner'|'exit'|'goals'>;
+// A game as the edit log records it: the score, goals and keepers, without the lineup.
+export type RoundSnapshot = Pick<Round,'a'|'b'|'scoreA'|'scoreB'|'winner'|'exit'|'goals'|'keepers'>;
 export type DayLogAction = 'editRound'|'undoRound'|'requestDayDeletion'|'approveDayDeletion'|'cancelDayDeletion'|'deleteDay';
 export type BoardLogAction = 'removePost'|'removeComment';
 export type LogAction = DayLogAction|BoardLogAction;
@@ -60,7 +62,7 @@ export function incumbentAt(day:ReadyDay,index:number):Team {
   if(!previous)return day.firstExit;
   return round.a===previous.a||round.a===previous.b?round.a:round.b;
 }
-export const snapshot=({a,b,scoreA,scoreB,winner,exit,goals}:Round):RoundSnapshot=>({a,b,scoreA,scoreB,winner,exit,goals});
+export const snapshot=({a,b,scoreA,scoreB,winner,exit,goals,keepers}:Round):RoundSnapshot=>({a,b,scoreA,scoreB,winner,exit,goals,keepers});
 // A played matchday is deleted only through approvals; an unplayed one can simply be cancelled.
 export const isPlayed=(day:Day)=>day.rounds.length>0||day.poll!=='ready';
 export function result(a:Team,b:Team,scoreA:number,scoreB:number,incumbent:Team){
@@ -93,17 +95,35 @@ export function playerStats(players:Player[],days:Day[]){
     return {...p,played,wins,goals,assists,attended,attendance:playedDays.length?Math.round(attended/playedDays.length*100):0};
   }).sort((a,b)=>b.goals-a.goals||b.assists-a.assists||b.wins-a.wins||a.name.localeCompare(b.name));
 }
+// Players who kept goal: games in goal and the goals their team conceded in them, ranked by goals conceded per game
+// (fewest first), then by more games in goal. A keeper qualifies for the table after keeping goal in at least half
+// the games played over the same days by the teams they kept goal for; keptFor is the team of their latest game in goal.
+export function keeperStats(players:Player[],days:Day[]){
+  const kept=new Map<string,{games:number;conceded:number;teams:Set<Team>;keptFor:Team}>();
+  for(const d of [...days].sort((a,b)=>a.date.localeCompare(b.date)))for(const r of d.rounds)for(const [team,id] of Object.entries(r.keepers??{}) as [Team,string][]){
+    const line=kept.get(id)??{games:0,conceded:0,teams:new Set<Team>(),keptFor:team};line.games++;line.conceded+=team===r.a?r.scoreB:r.scoreA;line.teams.add(team);line.keptFor=team;kept.set(id,line);
+  }
+  const played=Object.fromEntries(teamStats(days).map(s=>[s.team,s.played])) as Record<Team,number>;
+  return players.flatMap(p=>{const line=kept.get(p.id);if(!line)return [];const {teams,...rest}=line,teamGames=[...teams].reduce((n,t)=>n+played[t],0);
+    return [{...p,...rest,perGame:line.conceded/line.games,teamGames,qualified:line.games*2>=teamGames}];})
+    .sort((a,b)=>a.perGame-b.perGame||b.games-a.games||a.name.localeCompare(b.name));
+}
+// The keepers a new game starts with: each team's keeper from the last game it played, if that game had one.
+export function carriedKeepers(rounds:Round[],a:Team,b:Team):Keepers{
+  const keepers:Keepers={};
+  for(const t of [a,b]){const keeper=rounds.findLast(r=>r.a===t||r.b===t)?.keepers?.[t];if(keeper)keepers[t]=keeper;}
+  return keepers;
+}
 export function dateLabel(date:string,short=false){return new Intl.DateTimeFormat('en-CA',{month:short?'short':'long',day:'numeric',...(short?{}:{year:'numeric'}),timeZone:'UTC'}).format(new Date(date+'T12:00:00Z'));}
 // A game being played pitch-side, kept on the organiser's device until it is saved as a round.
-export type GameDraft = {lineup:string[];goals:Goal[];elapsed:number;startedAt:number|null};
+export type GameDraft = {lineup:string[];goals:Goal[];keepers:Keepers;elapsed:number;startedAt:number|null};
 export const GAME_MS=10*60*1000;
-export const freshDraft=(lineup:string[]):GameDraft=>({lineup,goals:[],elapsed:0,startedAt:null});
+export const freshDraft=(lineup:string[],keepers:Keepers={}):GameDraft=>({lineup,goals:[],keepers,elapsed:0,startedAt:null});
 export const draftKey=(dayId:string,game:number)=>`hrsc-game:${dayId}:${game}`;
 export function gameClock(draft:GameDraft,now:number){return Math.max(0,GAME_MS-draft.elapsed-(draft.startedAt===null?0:now-draft.startedAt));}
-export function roundPayload(draft:GameDraft,a:Team,b:Team){return {scoreA:draft.goals.filter(g=>g.team===a).length,scoreB:draft.goals.filter(g=>g.team===b).length,goals:draft.goals,lineup:draft.lineup};}
-export const SEASON_START='2026-09-01';
+export function roundPayload(draft:GameDraft,a:Team,b:Team){return {scoreA:draft.goals.filter(g=>g.team===a).length,scoreB:draft.goals.filter(g=>g.team===b).length,goals:draft.goals,lineup:draft.lineup,keepers:draft.keepers};}
 export const MAX_SERIES_DAYS=52;
-export function validDate(date:string){const d=new Date(date+'T12:00:00Z');return /^\d{4}-\d{2}-\d{2}$/.test(date)&&!isNaN(d.valueOf())&&d.toISOString().slice(0,10)===date&&date>=SEASON_START;}
+export function validDate(date:string){const d=new Date(date+'T12:00:00Z');return /^\d{4}-\d{2}-\d{2}$/.test(date)&&!isNaN(d.valueOf())&&d.toISOString().slice(0,10)===date;}
 // Every date from `from` to `to` inclusive that falls on from's weekday.
 export function weeklyDates(from:string,to:string){const dates:string[]=[];for(const d=new Date(from+'T12:00:00Z');d.toISOString().slice(0,10)<=to;d.setUTCDate(d.getUTCDate()+7))dates.push(d.toISOString().slice(0,10));return dates;}
 // Whole years since a birth year and month (1-12) as of `today` (YYYY-MM-DD). Only the month is known, so the birthday counts as reached from the first of its month.
