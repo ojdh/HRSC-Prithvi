@@ -121,13 +121,17 @@ try{
   await success('openPoll',{dayId});
   ok((await get()).data.days[0].rounds.length===0,'voting opens before any stats');
   ok((await post('setupDay',{dayId,roster:[...roster,absent.id],a:'red',b:'black',firstExit:'red'})).status===400,'vote eligibility roster locked');
-  ok((await post('vote',{dayId,candidate:red.id})).status===400,'own-team ballot blocked');
-  ok((await post('vote',{dayId,candidate:white.id},'absent-user')).status===403,'absent player cannot vote');
-  ok((await post('vote',{dayId,candidate:absent.id},'black-user')).status===400,'absent candidate blocked');
-  await success('vote',{dayId,candidate:black.id});
-  ok((await post('vote',{dayId,candidate:white.id})).status===409,'duplicate vote blocked');
+  ok((await post('vote',{dayId,candidates:[red.id,black.id]})).status===400,'own-team ballot blocked');
+  ok((await post('vote',{dayId,candidates:[black.id]})).status===400,'a ballot needs one player from each opposing team');
+  ok((await post('vote',{dayId,candidates:[black.id,black.id]})).status===400,'both picks cannot come from the same team');
+  ok((await post('vote',{dayId,candidates:[white.id]},'absent-user')).status===403,'absent player cannot vote');
+  ok((await post('vote',{dayId,candidates:[absent.id,owner.id]},'black-user')).status===400,'absent candidate blocked');
+  await success('vote',{dayId,candidates:[black.id,white.id]});
+  const voteRows=async table=>(await (await mf.getD1Database('DB')).prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE day=?`).bind(dayId).first('n'));
+  ok(await voteRows('ballots')===2&&await voteRows('vote_receipts')===1,'one voter leaves one receipt and two anonymous ballots');
+  ok((await post('vote',{dayId,candidates:[black.id,white.id]})).status===409,'duplicate vote blocked');
   let v=(await get('white-user')).data.revision;
-  const concurrent=await Promise.all([post('vote',{dayId,candidate:black.id},'white-user',v),post('vote',{dayId,candidate:red.id},'white-user',v)]);
+  const concurrent=await Promise.all([post('vote',{dayId,candidates:[black.id,red.id]},'white-user',v),post('vote',{dayId,candidates:[black.id,owner.id]},'white-user',v)]);
   ok(concurrent.filter(x=>x.status===200).length===1,'concurrent duplicate ballots blocked');
   state=(await get()).data;
   ok(state.polls[dayId].count===2&&state.polls[dayId].tally.length===0,'only participation count exposed while poll open');
@@ -140,10 +144,11 @@ try{
   state=(await get()).data;ok(state.days[0].rounds[2].exit==='white','consecutive draw rotates longer-staying side');
   await success('undoRound',{dayId,roundId:state.days[0].rounds[2].id});
   ok((await post('addRound',{dayId,scoreA:1,scoreB:0,lineup:[white.id,black.id],goals:[goal('white',white.id,white.id)]})).status===400,'self-assist blocked');
-  await success('vote',{dayId,candidate:owner.id},'black-user');
+  await success('vote',{dayId,candidates:[owner.id,white.id]},'black-user');
   await success('closePoll',{dayId});
   state=(await get()).data;ok(state.polls[dayId].tally.length>0&&state.polls[dayId].count===3,'results available only after close');
-  ok((await post('vote',{dayId,candidate:white.id},'red-user')).status===400,'closed voting rejected');
+  ok(state.polls[dayId].tally.reduce((n,t)=>n+t.votes,0)===6&&state.polls[dayId].tally.find(t=>t.candidate===black.id).votes===2,'every voter counts once for each opposing team');
+  ok((await post('vote',{dayId,candidates:[black.id,white.id]},'red-user')).status===400,'closed voting rejected');
   await success('addRound',{dayId,scoreA:0,scoreB:1,lineup:[white.id,black.id],goals:[goal('black',black.id)]});
   ok((await get()).data.days[0].rounds.length===3,'scores remain editable after poll closes');
 
@@ -160,7 +165,7 @@ try{
   ok((await mf.dispatchFetch(origin+'/api/video?key='+encodeURIComponent(clipKey),{method:'DELETE',headers:await headers('black-user')})).status===403,'player cannot remove highlight');
   await success('archivePlayer',{playerId:red.id});
   state=(await get()).data;ok(state.players.find(p=>p.id===red.id).active===false&&state.days[0].rounds[0].goals.length===3,'archive preserves historical goals');
-  ok((await post('vote',{dayId,candidate:black.id},'red-user')).status===400,'archived player cannot vote');
+  ok((await post('vote',{dayId,candidates:[black.id,white.id]},'red-user')).status===400,'archived player cannot vote');
   await success('restorePlayer',{playerId:red.id});
   ok((await get('red-user')).data.me===red.id,'restored player keeps account');
   // Admins: only the owner grants or removes admin rights.
@@ -465,9 +470,9 @@ try{
   ok(editLog.length===4&&editLog[0].by===owner.id&&editLog[0].roundId===edited[0].id&&editLog[0].before.scoreB===2&&editLog[0].after.scoreA===1&&editLog[0].date==='2026-09-13'&&Date.parse(editLog[0].at)<=Date.now(),'edits are logged newest first with who, when, before and after');
   ok(!('log' in (await get('absent-user')).data),'players never receive the edit log');
   // Voting and a clip on the played day, so deletion has something to clean up.
-  await success('openPoll',{dayId:editDay});await success('vote',{dayId:editDay,candidate:owner.id},'black-user');
+  await success('openPoll',{dayId:editDay});await success('vote',{dayId:editDay,candidates:[owner.id,white.id]},'black-user');
   const editClip=(await dayOf(editDay)).videoKey;
-  ok(editClip&&await bucket.head(editClip)&&await rowsFor('ballots',editDay)===1&&await rowsFor('vote_receipts',editDay)===1,'played day has a ballot, a receipt and a clip');
+  ok(editClip&&await bucket.head(editClip)&&await rowsFor('ballots',editDay)===2&&await rowsFor('vote_receipts',editDay)===1,'played day has a ballot, a receipt and a clip');
   ok((await post('deleteDay',{dayId:editDay})).status===400,'a played matchday cannot be cancelled outright');
   ok((await post('requestDayDeletion',{dayId:series.dayIds[3]})).status===400,'unplayed days are cancelled, not put to approval');
   for(const p of [red,white,black])await success('setAdmin',{playerId:p.id,admin:true});
