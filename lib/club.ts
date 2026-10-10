@@ -14,7 +14,8 @@ export type Goal = {team:Team;scorer:string|null;assist:string|null;ownGoal:bool
 export type Keepers = Partial<Record<Team,string>>;
 export type Round = {id:string;a:Team;b:Team;scoreA:number;scoreB:number;goals:Goal[];lineup:string[];keepers?:Keepers;exit:Team;winner:Team|null;videoUrl?:string|null};
 // A scheduled day has an empty roster and no opening teams until it is set up on the day. start/end are club-local HH:MM.
-export type Day = {id:string;date:string;start:string;end:string;roster:{id:string;team:Team}[];opening:[Team,Team]|null;firstExit:Team|null;rounds:Round[];poll:'ready'|'open'|'closed';videoUrl?:string|null;videoKey?:string|null;deletion?:DayDeletion};
+// ended: an admin ended the session, so no new games are added until it is resumed.
+export type Day = {id:string;date:string;start:string;end:string;roster:{id:string;team:Team}[];opening:[Team,Team]|null;firstExit:Team|null;rounds:Round[];poll:'ready'|'open'|'closed';ended?:boolean;videoUrl?:string|null;videoKey?:string|null;deletion?:DayDeletion};
 // A request to delete a played matchday. approvals holds player ids; the requester's counts as the first.
 export type DayDeletion = {requestedBy:string;approvals:string[]};
 export const DELETION_APPROVALS=3;
@@ -138,12 +139,12 @@ export function pastMatchdays(days:Day[],today:string){return days.filter(d=>d.d
 export type MatchdaySection='results'|'live'|'vote';
 export function matchdaySections(day:Day,today:string,isAdmin:boolean):MatchdaySection[]{return isAdmin&&day.date<=today?['live','vote','results']:['vote','results'];}
 // The section a matchday opens on: Live for admins during the session, Vote while voting is open, otherwise Results.
-export function defaultSection(day:Day,today:string,isAdmin:boolean):MatchdaySection{return isAdmin&&day.date===today&&day.poll!=='closed'?'live':day.poll==='open'?'vote':'results';}
-// Every matchday oldest first, marked past, today or upcoming; live is today's set-up session before voting closes.
-export function dateStrip(days:Day[],today:string){return [...days].sort((a,b)=>a.date.localeCompare(b.date)).map(day=>({day,when:day.date<today?'past' as const:day.date===today?'today' as const:'upcoming' as const,live:day.date===today&&isReady(day)&&day.poll!=='closed'}));}
+export function defaultSection(day:Day,today:string,isAdmin:boolean):MatchdaySection{return isAdmin&&day.date===today&&day.poll!=='closed'&&!day.ended?'live':day.poll==='open'?'vote':'results';}
+// Every matchday oldest first, marked past, today or upcoming; live is today's set-up session before voting closes or the day is ended.
+export function dateStrip(days:Day[],today:string){return [...days].sort((a,b)=>a.date.localeCompare(b.date)).map(day=>({day,when:day.date<today?'past' as const:day.date===today?'today' as const:'upcoming' as const,live:day.date===today&&isReady(day)&&day.poll!=='closed'&&!day.ended}));}
 // Home's one button for a matchday: Vote now while voting is open, Follow it live during today's set-up session,
 // See results once it is played, otherwise a preview of the day.
-export function homeAction(day:Day,today:string):'vote'|'live'|'results'|'preview'{return day.poll==='open'?'vote':day.date===today&&isReady(day)&&day.poll!=='closed'?'live':isPlayed(day)?'results':'preview';}
+export function homeAction(day:Day,today:string):'vote'|'live'|'results'|'preview'{return day.poll==='open'?'vote':day.date===today&&isReady(day)&&day.poll!=='closed'&&!day.ended?'live':isPlayed(day)?'results':'preview';}
 // The teams at the top of a matchday's own table; level teams share the day.
 export function dayWinners(day:Day){const table=teamStats([day]);return table.filter(s=>tablePosition(table,s.team)===1).map(s=>s.team);}
 // Player of the day: everyone tied on the most votes. A closed poll's tally arrives sorted by votes, highest first.

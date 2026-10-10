@@ -146,7 +146,7 @@ export async function POST(req:Request){try{
       club.days=club.days.filter(d=>d.id!==day.id);
     }else if(action==='addRound'){
       const input=roundInput.parse(body);
-      const day=club.days.find(d=>d.id===input.dayId);check(day,'Match day not found.');check(isReady(day),'Set attendance and opening teams first.');const n=nextMatch(day);
+      const day=club.days.find(d=>d.id===input.dayId);check(day,'Match day not found.');check(isReady(day),'Set attendance and opening teams first.');check(!day.ended,'This matchday has ended. Resume it under Manage to add games.');const n=nextMatch(day);
       const lineup=playedLineup(day,n.a,n.b,input);
       day.rounds.push({id:crypto.randomUUID(),a:n.a,b:n.b,scoreA:input.scoreA,scoreB:input.scoreB,lineup,goals:input.goals,keepers:input.keepers,...result(n.a,n.b,input.scoreA,input.scoreB,n.incumbent)});
     }else if(action==='editRound'){
@@ -170,6 +170,11 @@ export async function POST(req:Request){try{
     }else if(action==='cancelDayDeletion'){
       const day=club.days.find(d=>d.id===body.dayId);check(day?.deletion,'There is no deletion request for this match day.');
       delete day.deletion;record(club,actor(me),'cancelDayDeletion',day);
+    }else if(action==='endDay'){
+      const day=club.days.find(d=>d.id===body.dayId);check(day,'Match day not found.');check(isReady(day),'Set attendance and opening teams first.');check(day.date<=clubToday(),'A matchday can only end on or after its date.');check(!day.ended,'This matchday has already ended.');
+      day.ended=true;if(day.poll==='ready')day.poll='open';
+    }else if(action==='resumeDay'){
+      const day=club.days.find(d=>d.id===body.dayId);check(day?.ended,'This matchday has not ended.');delete day.ended;
     }else if(action==='openPoll'||action==='closePoll'){
       const day=club.days.find(d=>d.id===body.dayId);check(day,'Match day not found.');check(action==='closePoll'||isReady(day),'Set attendance and opening teams first.');check(action==='closePoll'||day.date<=clubToday(),'Voting opens on or after the match day.');check(day.poll===(action==='openPoll'?'ready':'open'),'Voting has already changed.');day.poll=action==='openPoll'?'open':'closed';
     }else if(action==='setMatchVideo'){

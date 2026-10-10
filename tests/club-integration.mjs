@@ -228,6 +228,29 @@ try{
   kept=(await get()).data.days.find(d=>d.id===keeperDay).rounds[0];
   ok(JSON.stringify(kept.keepers)===JSON.stringify({red:owner.id}),'editing a game changes or clears its keepers');
   await success('undoRound',{dayId:keeperDay,roundId:kept.id});await success('deleteDay',{dayId:keeperDay});
+  // Ending a matchday opens voting and stops new games until an admin resumes it; saved games stay editable.
+  const endId=(await success('addDays',{from:'2026-08-23',...slot})).dayIds[0];
+  ok((await post('endDay',{dayId:endId})).status===400,'a matchday must be set up before it ends');
+  await success('setupDay',{dayId:endId,roster,a:'red',b:'black',firstExit:'red'});
+  const endRound={dayId:endId,scoreA:1,scoreB:0,lineup:[owner.id,red.id,black.id],goals:[goal('red',owner.id)]};
+  await success('addRound',endRound);
+  ok((await post('endDay',{dayId:endId},'black-user')).status===403,'players cannot end a matchday');
+  await success('endDay',{dayId:endId});
+  let ended=(await get()).data.days.find(d=>d.id===endId);
+  ok(ended.ended===true&&ended.poll==='open','ending a matchday opens voting');
+  ok((await post('endDay',{dayId:endId})).status===400,'a matchday ends only once');
+  ok((await post('addRound',{...endRound,lineup:[owner.id,white.id],goals:[],scoreA:0})).status===400,'no new games after the matchday ends');
+  await success('editRound',{...endRound,scoreA:2,goals:[goal('red',owner.id),goal('red',red.id)],roundId:ended.rounds[0].id});
+  ok((await get()).data.days.find(d=>d.id===endId).rounds[0].scoreA===2,'saved games stay editable after the matchday ends');
+  ok((await post('resumeDay',{dayId:endId},'black-user')).status===403,'players cannot resume a matchday');
+  await success('resumeDay',{dayId:endId});
+  ended=(await get()).data.days.find(d=>d.id===endId);
+  ok(!ended.ended&&ended.poll==='open','resuming a matchday keeps voting open');
+  ok((await post('resumeDay',{dayId:endId})).status===400,'only an ended matchday can be resumed');
+  await success('addRound',{...endRound,lineup:[owner.id,white.id],goals:[],scoreA:0});
+  await success('requestDayDeletion',{dayId:endId});
+  const laterId=(await success('addDays',{from:'2099-01-11',...slot})).dayIds[0];await success('setupDay',{dayId:laterId,roster,a:'red',b:'black',firstExit:'red'});
+  ok((await post('endDay',{dayId:laterId})).status===400,'a matchday cannot end before its date');await success('deleteDay',{dayId:laterId});
   ok((await post('editDay',{dayId:wednesday,date:'2026-09-13',...slot})).status===400,'edited date cannot clash');
   await success('editDay',{dayId:wednesday,date:'2026-09-17',start:'19:00',end:'20:00'});
   const moved=(await get()).data.days.find(d=>d.id===wednesday);ok(moved.date==='2026-09-17'&&moved.start==='19:00'&&moved.end==='20:00','match day moved to a new date and time');
@@ -368,6 +391,7 @@ try{
   ok(opens(md('2026-10-08','open'),false)==='vote'&&opens(md('2026-10-01','open'),true)==='vote'&&opens(md('2026-10-08'),false)==='results'&&opens(md('2026-10-08','closed'),false)==='results'&&opens(md('2026-10-15'),true)==='results','Vote while voting is open, otherwise Results');
   const strip=model.dateStrip([{...md('2026-10-15'),id:'next'},{...md('2026-10-08'),id:'today'},{...md('2026-09-20'),id:'old'},{...md('2026-10-01','closed'),id:'last'}],'2026-10-08');
   ok(strip.map(s=>s.day.id+':'+s.when).join()==='old:past,last:past,today:today,next:upcoming','date strip runs from past days through today to upcoming days');
+  ok(opens({...md('2026-10-08','open'),ended:true},true)==='vote'&&!model.dateStrip([{...md('2026-10-08','open'),ended:true}],'2026-10-08')[0].live,'an ended matchday is no longer live');
   ok(strip.filter(s=>s.live).map(s=>s.day.id).join()==='today'&&!model.dateStrip([md('2026-10-08','closed')],'2026-10-08')[0].live&&!model.dateStrip([md('2026-10-08','ready',false)],'2026-10-08')[0].live,'only today\'s set-up, unclosed session shows as live');
   ok(JSON.stringify(model.awardWinners([{candidate:'a',votes:3},{candidate:'b',votes:3},{candidate:'c',votes:1}]).map(w=>w.candidate))==='["a","b"]'&&model.awardWinners([]).length===0,'player of the day is everyone tied on the most votes');
   const squad=[{id:'r1',team:'red'},{id:'w1',team:'white'}];
