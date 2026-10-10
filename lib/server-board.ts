@@ -2,7 +2,7 @@ import { BOARD_LIMITS, LOG_LIMIT, TEAMS, type BoardLogAction, type BoardPage, ty
 import { check, db, readClub, role, saveClub } from './server-club';
 
 // Board access, checked first on every board request: signed in, an active club member,
-// and on that team or an admin. Owners and admins can open every board to moderate it.
+// and on that team. Admins and the owner open only their own team's board, where admins also moderate.
 export type BoardViewer = Awaited<ReturnType<typeof boardViewer>>;
 type PostRow = { id: string; team: Team; author: string; body: string; created_at: number };
 type CommentRow = { id: string; post_id: string; author: string; body: string; created_at: number };
@@ -16,16 +16,15 @@ export async function boardViewer(user: { userId: string } | null) {
   return { ...stored, me: me?.active !== false ? me : undefined, admin };
 }
 
-// A team's private spaces (its board, its formations) open to its own players and, where admins are let in, to admins.
-export function openTeamSpace(viewer: BoardViewer, team: unknown, admins: boolean, missing: string, refused: string): Team {
+// A team's private spaces (its board, its formations) open only to its own active players, admins included.
+export function openTeamSpace(viewer: BoardViewer, team: unknown, missing: string, refused: string): Team {
   check(TEAMS.includes(team as Team), missing);
-  check(viewer.me?.team === team || (viewer.admin && admins), refused, 403);
+  check(viewer.me?.team === team, refused, 403);
   return team as Team;
 }
 
-// Admins can read and moderate any board, but only a team's own players post, comment and react on it.
-export function openTeam(viewer: BoardViewer, team: unknown, takePart = false): Team {
-  return openTeamSpace(viewer, team, !takePart, 'Team board not found.', takePart && viewer.admin ? 'Only this team’s players can post on its board.' : 'This board belongs to another team.');
+export function openTeam(viewer: BoardViewer, team: unknown): Team {
+  return openTeamSpace(viewer, team, 'Team board not found.', 'This board belongs to another team.');
 }
 
 // Newest first. The cursor is the last post's created_at and id, so paging stays stable when posts are added or removed.

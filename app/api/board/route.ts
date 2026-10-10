@@ -38,7 +38,7 @@ export async function POST(req: Request) {
       return [...stored];
     };
     if (action === 'createPost') {
-      const team = openTeam(viewer, form.get('team'), true);
+      const team = openTeam(viewer, form.get('team'));
       const body = text(form.get('body'), BOARD_LIMITS.post), images = await photos(form, BOARD_LIMITS.postImages);
       const id = crypto.randomUUID(), now = Date.now(), keys = await store(images);
       await db().batch([
@@ -49,7 +49,7 @@ export async function POST(req: Request) {
     }
     if (action === 'comment') {
       const post = await findPost(form.get('postId'));
-      openTeam(viewer, post.team, true);
+      openTeam(viewer, post.team);
       const body = text(form.get('body'), BOARD_LIMITS.comment), images = await photos(form, BOARD_LIMITS.commentImages);
       const full = await db().prepare('SELECT COUNT(*) AS n FROM board_comments WHERE post_id=?').bind(post.id).first<number>('n');
       check((full ?? 0) < BOARD_LIMITS.comments, `This post has reached ${BOARD_LIMITS.comments} comments.`);
@@ -64,7 +64,7 @@ export async function POST(req: Request) {
     }
     if (action === 'react') {
       const targetId = form.get('targetId'), emoji = form.get('emoji');
-      openTeam(viewer, await reactionTeam(targetId), true);
+      openTeam(viewer, await reactionTeam(targetId));
       check(BOARD_REACTIONS.includes(emoji as BoardReaction), 'Choose one of the board reactions.');
       const removed = await db().prepare('DELETE FROM board_reactions WHERE target_id=? AND player=? AND emoji=?').bind(targetId, me.id, emoji).run();
       if (!removed.meta.changes) await db().prepare('INSERT OR IGNORE INTO board_reactions(target_id,player,emoji) SELECT ?1,?2,?3 WHERE EXISTS(SELECT 1 FROM board_posts WHERE id=?1) OR EXISTS(SELECT 1 FROM board_comments WHERE id=?1)').bind(targetId, me.id, emoji).run();
