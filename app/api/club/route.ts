@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { z } from 'zod';
 import { getUser } from '../../auth';
-import { TEAMS,DEFAULT_TEAMS,MAX_SERIES_DAYS,DELETION_APPROVALS,LOG_LIMIT,nextMatch,incumbentAt,result,snapshot,isPlayed,emptyClub,isReady,isVideoUrl,validDate,weeklyDates,clubToday,type Club,type Day,type Team,type DayLogEntry } from '@/lib/club';
+import { TEAMS,DEFAULT_TEAMS,MAX_SERIES_DAYS,DELETION_APPROVALS,LOG_LIMIT,nextMatch,incumbentAt,result,snapshot,isPlayed,emptyClub,isReady,isVideoUrl,validDate,weeklyDates,clubToday,type Club,type Day,type Team,type DayLogEntry,type Player } from '@/lib/club';
 import { db,readClub,saveClub,check,digest,token,role,ClubError } from '@/lib/server-club';
 import {pendingInvite,findInvitation,inviteCookie} from '@/lib/server-invitations';
 import {deleteObject} from '@/lib/r2-budget';
@@ -95,7 +95,7 @@ export async function POST(req:Request){try{
       if(newEmail)check(!emailTaken(club,newEmail),'Another player already uses that email.');
       club.players.push({...input,...(newEmail?{email:newEmail}:{}),id:crypto.randomUUID(),active:true,photo:null});
     }else if(action==='editPlayer'){
-      const {email:newEmail,...input}=details.extend({team,id,email:email.optional()}).refine(...birthPair).parse(body);const p=club.players.find(p=>p.id===input.id&&p.active!==false);check(p,'Active player not found.');Object.assign(p,input);
+      const {email:newEmail,...input}=details.extend({team,id,email:email.optional()}).refine(...birthPair).parse(body);const p=club.players.find(p=>p.id===input.id&&p.active!==false);check(p,'Active player not found.');Object.assign(p,input);dropCaptaincy(club,p);
       if(newEmail!==undefined&&newEmail!==(p.email??null)){
         check(!p.userId,'A player’s email can only be changed before they accept their invitation.');
         if(newEmail)check(!emailTaken(club,newEmail,p.id),'Another player already uses that email.');
@@ -108,13 +108,17 @@ export async function POST(req:Request){try{
       if(action==='archivePlayer'){
         check(p.active!==false,'This player has already been removed.');check(owner||!club.admins.includes(p.id),'Only the club owner can remove an admin.',403);
         check(!club.days.some(d=>d.poll==='open'&&d.roster.some(r=>r.id===p.id)),'Close voting for this player’s match day before removing them.');
-        p.active=false;club.admins=club.admins.filter(a=>a!==p.id);
+        p.active=false;club.admins=club.admins.filter(a=>a!==p.id);dropCaptaincy(club,p);
         if(p.accessEmail)access={change:{remove:p.accessEmail},apply:()=>{p.accessEmail=null;}};
       }else{check(p.active===false,'This player is already on the active roster.');p.active=true;}
     }else if(action==='editTeam'){
       const input=z.object({team,name:z.string().trim().min(1).max(30),letter:z.string().trim().min(1).max(2).transform(s=>s.toUpperCase()),color:z.string().regex(/^#[0-9a-fA-F]{6}$/,'Choose a colour like #1f7a4d.').transform(s=>s.toLowerCase()),motto:z.string().trim().max(60)}).parse(body);
       check(TEAMS.every(t=>t===input.team||club.teams[t].name.toLowerCase()!==input.name.toLowerCase()),'Each team needs its own name.');
       club.teams[input.team]={...club.teams[input.team],name:input.name,color:input.color,letter:input.letter,motto:input.motto};
+    }else if(action==='setCaptain'){
+      const input=z.object({team,playerId:id.nullable()}).parse(body);
+      if(input.playerId){const p=club.players.find(p=>p.id===input.playerId&&p.active!==false);check(p&&p.team===input.team,'Choose an active player from this team as captain.');club.teams[input.team].captain=p.id;}
+      else delete club.teams[input.team].captain;
     }else if(action==='invite'){
       const p=club.players.find(p=>p.id===body.playerId&&p.active!==false);check(p,'Active player not found.');check(!p.userId,'This player already has an account.');
       if(!p.inviteToken){if(p.inviteHash)p.legacyInviteHash=p.inviteHash;p.inviteToken=token();p.inviteHash=await digest(p.inviteToken);}extra={invite:p.inviteToken};
@@ -210,6 +214,8 @@ function record(club:Club,by:string,action:DayLogEntry['action'],day:Day,details
 }
 // Deletes the day once the owner has approved or enough current admins have. Approvals from people who are no
 // longer admins do not count. Returns the removed day so its ballots and clip can be cleaned up after saving.
+// A captain who leaves their team or the active roster stops being its captain.
+function dropCaptaincy(club:Club,p:Player){for(const t of TEAMS)if(club.teams[t].captain===p.id&&(p.active===false||p.team!==t))delete club.teams[t].captain;}
 function settleDeletion(club:Club,day:Day,by:string){
   const ownerId=club.players.find(p=>p.userId===club.adminId)?.id;
   const current=day.deletion!.approvals.filter(pid=>pid===ownerId||club.admins.includes(pid)&&club.players.some(p=>p.id===pid&&p.active!==false));
