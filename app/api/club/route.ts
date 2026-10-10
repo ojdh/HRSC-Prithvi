@@ -55,15 +55,20 @@ export async function POST(req:Request){try{
   check(stored,'The organiser needs to set up the club first.');const {club,revision}=stored;
   const {me,owner,admin}=role(club,user.userId);
   if(action==='vote'){
-    const input=z.object({dayId:id,candidate:id}).parse(body);const day=club.days.find(d=>d.id===input.dayId);check(day&&day.poll==='open','Voting is not open for this match day.');
-    const voter=day.roster.find(p=>p.id===me?.id),candidate=day.roster.find(p=>p.id===input.candidate);
-    check(voter&&me?.active!==false,'Only active players marked as attending can vote.',403);check(candidate&&club.players.find(p=>p.id===candidate.id)?.active!==false&&candidate.team!==voter.team,'Choose an active player from one of the other two teams.');
+    const input=z.object({dayId:id,candidates:z.array(id).min(1).max(2)}).parse(body);const day=club.days.find(d=>d.id===input.dayId);check(day&&day.poll==='open','Voting is not open for this match day.');
+    const voter=day.roster.find(p=>p.id===me?.id);
+    check(voter&&me?.active!==false,'Only active players marked as attending can vote.',403);
+    // A ballot names one active attending player from each opposing team that has one.
+    const eligible=day.roster.filter(p=>p.team!==voter.team&&club.players.find(x=>x.id===p.id)?.active!==false);
+    const picks=input.candidates.map(c=>eligible.find(p=>p.id===c)),teams=new Set(eligible.map(p=>p.team));
+    check(picks.every(p=>p)&&new Set(picks.map(p=>p!.team)).size===picks.length&&picks.length===teams.size,'Choose one active player from each of the other two teams.');
     try{
+      // Each ballot is stored only if the statement before it stored a row, so the receipt and every ballot land together.
       const r=await db().batch([
         db().prepare('INSERT INTO vote_receipts (day,player) SELECT ?,? WHERE EXISTS (SELECT 1 FROM club WHERE id=1 AND revision=?)').bind(day.id,me!.id,revision),
-        db().prepare('INSERT INTO ballots (id,day,candidate) SELECT ?,?,? WHERE changes()=1').bind(crypto.randomUUID(),day.id,candidate.id),
+        ...picks.map(p=>db().prepare('INSERT INTO ballots (id,day,candidate) SELECT ?,?,? WHERE changes()=1').bind(crypto.randomUUID(),day.id,p!.id)),
       ]);
-      check(r[0].meta.changes===1&&r[1].meta.changes===1,'The match day changed. Refresh and vote again.',409);
+      check(r.every(x=>x.meta.changes===1),'The match day changed. Refresh and vote again.',409);
     }catch(e){if(e instanceof ClubError)throw e;if(String(e).includes('UNIQUE'))throw new ClubError('Your vote has already been recorded.',409);throw e;}
     return response({ok:true});
   }
