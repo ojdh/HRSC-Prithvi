@@ -203,6 +203,27 @@ try{
   const afterTeams=(await get('black-user')).data;
   ok(JSON.stringify(afterTeams.teams.black)===JSON.stringify({name:'Tigers',color:'#1f7a4d',letter:'T',motto:'Hunt as one.'}),'team details saved and normalised');
   ok(afterTeams.teams.red.name==='Team Red'&&JSON.stringify(afterTeams.days)===JSON.stringify(beforeTeams.days)&&afterTeams.players.find(p=>p.id===black.id).team==='black','renaming keeps rosters, rounds and assignments');
+  // Captains: an admin names one active player per team; leaving the team or the roster clears it.
+  const captainOf=async t=>(await get('black-user')).data.teams[t].captain??null;
+  ok((await post('setCaptain',{team:'red',playerId:red.id},'black-user')).status===403,'players cannot name a captain');
+  ok((await post('setCaptain',{team:'red',playerId:black.id})).status===400,'a captain must play for that team');
+  await success('setCaptain',{team:'red',playerId:red.id});
+  ok(await captainOf('red')===red.id&&await captainOf('black')===null,'an admin names a team captain');
+  await success('editTeam',{team:'red',name:'Team Red',color:afterTeams.teams.red.color,letter:afterTeams.teams.red.letter,motto:afterTeams.teams.red.motto});
+  ok(await captainOf('red')===red.id,'editing the team keeps its captain');
+  await success('setCaptain',{team:'red',playerId:owner.id});
+  ok(await captainOf('red')===owner.id,'naming a new captain replaces the old one');
+  await success('setCaptain',{team:'red',playerId:null});
+  ok(await captainOf('red')===null,'an admin can clear the captain');
+  await success('setCaptain',{team:'red',playerId:red.id});await success('archivePlayer',{playerId:red.id});
+  ok(await captainOf('red')===null,'removing the captain from the roster clears the captaincy');
+  await success('restorePlayer',{playerId:red.id});
+  ok((await post('setCaptain',{team:'red',playerId:absent.id})).status===400,'a captain must be on that team\'s roster');
+  await success('setCaptain',{team:'red',playerId:red.id});
+  const redNow=(await get()).data.players.find(p=>p.id===red.id);
+  await success('editPlayer',{...fields,id:red.id,name:redNow.name,team:'black'});
+  ok(await captainOf('red')===null,'moving the captain to another team clears the captaincy');
+  await success('editPlayer',{...fields,id:red.id,name:redNow.name,team:'red'});
   // Scheduling: weekly series and one-off days, each with a time; set up on the day.
   const slot={start:'18:00',end:'19:30'};
   const series=await success('addDays',{from:'2026-09-13',to:'2026-11-29',...slot});
