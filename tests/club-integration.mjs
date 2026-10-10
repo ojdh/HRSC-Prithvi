@@ -728,7 +728,7 @@ try{
     ok(await inBucket(orphans.fresh)&&await inLedger(orphans.fresh),'object uploaded within the last hour kept');
     for(const key of referenced)ok(await inBucket(key)&&await inLedger(key),'referenced object kept: '+key.split('/')[0]);
   }finally{await janitor.dispose();await rm(storageDir,{recursive:true,force:true})}
-  // Team boards: each team's private discussion. Admins read and moderate every board.
+  // Team boards: each team's private discussion, open only to that team's players; admins moderate their own team's board.
   async function clubCall(instance,action,body={},user='owner'){const read=await (await instance.dispatchFetch(origin+'/api/club',{headers:await headers(user)})).json();const r=await instance.dispatchFetch(origin+'/api/club',{method:'POST',headers:await headers(user),body:JSON.stringify({action,revision:read.revision,...body})});const reply=await r.json();assert.equal(r.status,200,action+': '+JSON.stringify(reply));return reply}
   async function linkMember(instance,name,team,user){await clubCall(instance,'addPlayer',{...fields,name,team});const id=(await (await instance.dispatchFetch(origin+'/api/club',{headers:await headers('owner')})).json()).players.find(p=>p.name===name).id;await clubCall(instance,'claim',{token:(await clubCall(instance,'invite',{playerId:id})).invite},user);return id}
   const boards=new Miniflare({...workerOptions,bindings:{...accessBindings,...budget({storage:1e9,classA:1e6,classB:1e7})}});
@@ -752,8 +752,8 @@ try{
     ok(redBoard.status===200&&post.body==='Training moved to 7.\nBring both kits.'&&post.author===redId&&post.team==='red'&&post.images.length===2,'player reads their own team board');
     ok((await readBoard('board-red','black')).status===403,'another team’s board is private');
     ok((await boardSend('board-red',{action:'createPost',team:'black',body:'Hello rivals'})).status===403,'players cannot post on another team’s board');
-    ok((await Promise.all(['red','black','white'].map(t=>readBoard('owner',t)))).every(r=>r.status===200),'admins read every board');
-    ok((await boardSend('owner',{action:'createPost',team:'black',body:'From the owner'})).status===403,'admins moderate other boards but do not post on them');
+    ok((await readBoard('owner','red')).status===200&&(await Promise.all(['black','white'].map(t=>readBoard('owner',t)))).every(r=>r.status===403),'an admin reads only their own team’s board');
+    ok((await boardSend('owner',{action:'createPost',team:'black',body:'From the owner'})).status===403,'an admin cannot post on another team’s board');
     ok((await readBoard(null,'red')).status===401,'boards need sign-in');
     ok((await readBoard('board-gone','white')).status===403,'archived players lose their board');
     ok((await readBoard('intruder','red')).status===403,'non-members cannot read boards');
@@ -818,6 +818,7 @@ try{
     // Paging: newest first, twenty at a time
     for(let i=0;i<21;i++)await boardSend('board-black',{action:'createPost',team:'black',body:'Post '+i});
     const firstPage=(await readBoard('board-black','black')).data,secondPage=(await readBoard('board-black','black',firstPage.next)).data;
+    ok((await boardSend('owner',{action:'deletePost',postId:firstPage.posts[0].id})).status===403&&(await readBoard('board-black','black')).data.posts[0].id===firstPage.posts[0].id,'an admin cannot remove posts from another team’s board');
     const paged=[...firstPage.posts,...secondPage.posts].map(p=>p.body);
     ok(firstPage.posts.length===20&&secondPage.posts.length===1&&secondPage.next===null&&new Set(paged).size===21&&firstPage.posts.every((p,i,all)=>!i||all[i-1].createdAt>=p.createdAt),'the feed pages twenty posts at a time, newest first');
   }finally{await boards.dispose()}
@@ -834,7 +835,7 @@ try{
     ok((await boardTight.dispatchFetch(origin+'/api/board/image?key='+encodeURIComponent(key),{headers:await headers('tight-black')})).status===403&&await used('class_b')===0,'a refused board photo view costs no R2 operation');
     ok((await boardTight.dispatchFetch(origin+'/api/board/image?key='+encodeURIComponent(key),{headers:await headers('owner')})).status===200,'the one budgeted board photo view still fits');
   }finally{await boardTight.dispose()}
-  // Team formations: private to the team and admins; the team's players and every admin edit them, and the last save wins.
+  // Team formations: private to the team's own players, admins included only for their own team; the last save wins.
   const formations=new Miniflare({...workerOptions,bindings:{...accessBindings,...budget({storage:1e9,classA:1e6,classB:1e7})}});
   try{
     // Arrange: two red players, one black player, a white admin and an archived red player
@@ -862,9 +863,10 @@ try{
     const redPlan=(await formationSend('form-red',{action:'create',team:'red',name:'Red plan'})).data.id;
     ok((await readFormations('form-black','red')).status===403,'another team’s formations are private');
     ok((await formationSend('form-black',{action:'save',id:redPlan,name:'Hijack',slots:[]})).status===403&&(await formationSend('form-black',{action:'create',team:'red',name:'Hijack'})).status===403&&(await formationSend('form-black',{action:'delete',id:redPlan})).status===403,'players cannot change another team’s formations');
-    ok((await Promise.all(['red','black','white'].map(t=>readFormations('form-white',t)))).every(r=>r.status===200),'admins read every team’s formations');
-    ok((await formationSend('form-white',{action:'save',id:redPlan,name:'Admin plan',slots:[slot('a',{playerId:redId})]})).status===200&&(await readFormations('form-red','red')).data.formations[0].name==='Admin plan','an admin saves another team’s formation');
-    ok((await formationSend('owner',{action:'create',team:'black',name:'Owner plan',slots:[slot('a',{playerId:blackId})]})).status===200,'the owner creates a formation for any team');
+    ok((await readFormations('form-white','white')).status===200&&(await Promise.all(['red','black'].map(t=>readFormations('form-white',t)))).every(r=>r.status===403),'an admin reads only their own team’s formations');
+    ok((await formationSend('form-white',{action:'save',id:redPlan,name:'Admin plan',slots:[slot('a',{playerId:redId})]})).status===403&&(await readFormations('form-red','red')).data.formations[0].name==='Red plan','an admin cannot save another team’s formation');
+    ok((await formationSend('owner',{action:'create',team:'black',name:'Owner plan',slots:[slot('a',{playerId:blackId})]})).status===403,'the owner cannot create a formation for another team');
+    ok((await formationSend('owner',{action:'create',team:'red',name:'Owner plan',slots:[slot('a',{playerId:redId})]})).status===200,'the owner edits their own team’s formations');
     ok((await readFormations(null,'red')).status===401&&(await formationSend(null,{action:'create',team:'red',name:'Anon'})).status===401,'formations need sign-in');
     ok((await readFormations('form-gone','red')).status===403&&(await formationSend('form-gone',{action:'create',team:'red',name:'Gone'})).status===403,'archived players lose their team’s formations');
     ok((await readFormations('intruder','red')).status===403,'non-members cannot read formations');
@@ -884,7 +886,7 @@ try{
     await refused([slot('a',{label:'One'}),slot('a',{label:'Two'})],'slot ids are unique');
     await refused([],'an empty name','   ');
     await refused([],'a name over 40 characters','x'.repeat(41));
-    ok((await readFormations('form-red','red')).data.formations.find(f=>f.id===redPlan).name==='Admin plan','refused saves change nothing');
+    ok((await readFormations('form-red','red')).data.formations.find(f=>f.id===redPlan).name==='Red plan','refused saves change nothing');
     for(let i=(await readFormations('form-red','red')).data.formations.length;i<10;i++)ok((await formationSend('form-red',{action:'create',team:'red',name:'Plan '+i})).status===200,'formation '+(i+1)+' fits');
     const before=await formationRows();
     ok((await formationSend('form-red',{action:'create',team:'red',name:'Eleventh'})).status===400&&await formationRows()===before,'a team keeps at most 10 formations');

@@ -5,9 +5,9 @@ import { openTeamSpace, type BoardViewer } from './server-board';
 
 type FormationRow = { id: string; name: string; slots: string; updated_by: string; updated_at: number };
 
-// Formations: the team's own players and every admin read and edit them, and the last save wins.
+// Formations: only the team's own players (admins included) read and edit them, and the last save wins.
 export function openFormations(viewer: BoardViewer, team: unknown): Team {
-  return openTeamSpace(viewer, team, true, 'Team not found.', 'These formations belong to another team.');
+  return openTeamSpace(viewer, team, 'Team not found.', 'These formations belong to another team.');
 }
 
 // Newest first. A squad slot whose player has left the team or been archived is kept as stored and marked former.

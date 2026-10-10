@@ -309,11 +309,11 @@ function ProfileStats({p,data,refresh,confirm}:{p:Player;data:PublicClub;refresh
 function PlayerCard({p}:{p:PlayerLine}){const teamInfo=useContext(TeamsCtx),open=useContext(LinksCtx);return <article className="player-card" data-team={p.team} style={teamVars(teamInfo[p.team])}><button className="player-cover w-full" onClick={()=>open.player(p.id)} aria-label={'View '+p.name}><span className="player-number">{teamInfo[p.team].letter}</span><Avatar p={p} size="lg"/></button><div className="player-info"><h3>{p.name}<BirthdayCake p={p}/></h3><div className="position">{teamInfo[p.team].name} · {teamInfo[p.team].captain===p.id&&'Captain · '}{p.position}{ageLabel(p)}</div><div className="player-card-stats"><div><strong>{p.attended}</strong><span>MATCHDAYS</span></div><div><strong>{p.wins}</strong><span>WINS</span></div><div><strong>{p.goals}</strong><span>GOALS</span></div><div><strong>{p.assists}</strong><span>ASSISTS</span></div></div></div><div className="player-actions"><button className="text-btn" onClick={()=>open.player(p.id)}>Player profile<ArrowUpRight/></button></div></article>}
 type TeamSection='squad'|'stats'|'board'|'formation';
 const TEAM_SECTIONS:Record<TeamSection,[string,typeof Users]>={squad:['Squad',Users],stats:['Stats',Trophy],board:['Board',MessagesSquare],formation:['Formation',Shirt]};
-// One team's page: its header, then Squad, Stats and, for its own players and admins, its private Board and Formation. Admins manage the team from the strip above.
+// One team's page: its header, then Squad, Stats and, for its own players only, its private Board and Formation. Admins manage the team from the strip above.
 function TeamPage({data,team,requested,players,table,season,scope,member,busy,action,confirm,onSection,onEditTeam,onAddPlayer,onEditPlayer,onInvite,onToggleAdmin}:{data:PublicClub;team:Team;requested?:string;players:PlayerLine[];table:ReturnType<typeof teamStats>;season:ReturnType<typeof teamStats>;scope:ReactNode;member:boolean;busy:boolean;action:Action;confirm:Confirm;onSection:(section:TeamSection)=>void;onEditTeam:()=>void;onAddPlayer:()=>void;onEditPlayer:(p:Player)=>void;onInvite:(p:Player)=>void;onToggleAdmin:(p:Player)=>void}){
   const teamInfo=useContext(TeamsCtx),info=teamInfo[team],me=data.players.find(p=>p.id===data.me);
-  // The API also refuses a board or formation to anyone but its team's players and admins.
-  const sections:TeamSection[]=member&&(data.isAdmin||me?.team===team)?['squad','stats','board','formation']:['squad','stats'];
+  // The API also refuses a board or formation to anyone but that team's own players, admins included.
+  const sections:TeamSection[]=member&&me?.team===team?['squad','stats','board','formation']:['squad','stats'];
   const section=sections.find(s=>s===requested)??'squad';
   const record=season.find(s=>s.team===team)!,stats=table.find(s=>s.team===team)!,position=tablePosition(season,team),squad=players.filter(p=>p.team===team),captain=data.players.find(p=>p.id===info.captain);
   return <div className="rise">
@@ -542,13 +542,12 @@ const RELATIVE=new Intl.RelativeTimeFormat('en-CA',{numeric:'auto'}),POSTED_ON=n
 function postedAgo(at:number){const seconds=Math.round((at-Date.now())/1000);if(seconds<-7*86400)return POSTED_ON.format(new Date(at));for(const [unit,size] of [['day',86400],['hour',3600],['minute',60]] as const)if(Math.abs(seconds)>=size)return RELATIVE.format(Math.round(seconds/size),unit);return 'just now'}
 const boardImage=(key:string)=>'/api/board/image?key='+encodeURIComponent(key);
 async function boardRequest(fields:Record<string,string|File[]>){const form=new FormData();for(const [k,v] of Object.entries(fields))for(const item of [v].flat())form.append(k,item);const r=await fetch('/api/board',{method:'POST',body:form});const j=await r.json() as {error?:string};if(!r.ok)throw new Error(j.error||'The team board could not be updated. Please try again.');return j}
-// A team's private discussion, shown on its team page to its players and to admins, who moderate every board.
+// A team's private discussion, shown on its team page only to its own players; admins on the team also moderate it.
 function TeamBoard({data,team,confirm}:{data:PublicClub;team:Team;confirm:Confirm}){
-  const teamInfo=useContext(TeamsCtx);const me=data.players.find(p=>p.id===data.me);
+  const teamInfo=useContext(TeamsCtx);
   const [posts,setPosts]=useState<BoardPost[]|null>(null),[next,setNext]=useState<string|null>(null),[loadingMore,setLoadingMore]=useState(false),[viewing,setViewing]=useState('');
   // What is on screen now, so a response that arrives after a team switch is dropped.
   const shown=useRef({team,posts});useEffect(()=>{shown.current={team,posts}});
-  const canTakePart=me?.team===team;
   async function fetchPage(before?:string){const r=await fetch('/api/board?team='+team+(before?'&before='+encodeURIComponent(before):''),{cache:'no-store'});const j=await r.json() as BoardPage&{error?:string};if(!r.ok)throw new Error(j.error||'The team board could not load.');return j}
   // Reloads the newest page and keeps any older posts of this board already loaded beneath it.
   async function refresh(){const forTeam=team;try{const first=await fetchPage();if(shown.current.team!==forTeam)return;const oldest=first.posts.at(-1);
@@ -562,32 +561,30 @@ function TeamBoard({data,team,confirm}:{data:PublicClub;team:Team;confirm:Confir
       action:()=>void act(kind==='post'?{action:'deletePost',postId:id}:{action:'deleteComment',commentId:id},kind==='post'?'Post deleted.':'Comment deleted.')})}
   const author=(id:string)=>data.players.find(p=>p.id===id);
   const react=(targetId:string,emoji:BoardReaction)=>void act({action:'react',targetId,emoji});
-  return <div><div className="board-intro"><p className="help">{canTakePart?'Private: plans, photos and banter for your team only.':'Private to this team. Admins can read every board and remove posts.'}</p><button type="button" className="secondary-btn" onClick={()=>void refresh()}><RefreshCw/>Refresh</button></div>
-    {canTakePart&&<BoardComposer key={team} onPost={(body,photos)=>act({action:'createPost',team,body,images:photos},'Posted to the board.')}/>}
+  return <div><div className="board-intro"><p className="help">Private: plans, photos and banter for your team only.</p><button type="button" className="secondary-btn" onClick={()=>void refresh()}><RefreshCw/>Refresh</button></div>
+    <BoardComposer key={team} onPost={(body,photos)=>act({action:'createPost',team,body,images:photos},'Posted to the board.')}/>
     {posts===null?<div className="banner" role="status"><span className="flex gap-2 items-center"><Loader2 className="animate-spin" size={16}/>Loading the board…</span></div>
-      :!posts.length?<div className="panel"><NoData title="Nothing posted yet">{canTakePart?'Start the conversation: share a plan, a photo or a shout-out.':'This team has not posted anything yet.'}</NoData></div>
+      :!posts.length?<div className="panel"><NoData title="Nothing posted yet">Start the conversation: share a plan, a photo or a shout-out.</NoData></div>
       :<div className="board-feed">{posts.map(post=>{const writer=author(post.author);return <article className="panel board-post" key={post.id}>
         <header className="board-head"><Avatar p={writer}/><div><strong><PlayerLink id={post.author} players={data.players} fallback="Former player"/></strong><small>{postedAgo(post.createdAt)}</small></div>{(post.author===data.me||data.isAdmin)&&<button type="button" className="text-btn remove-btn" aria-label="Delete post" onClick={()=>remove('post',post.id,post.author)}><Trash2 size={16}/></button>}</header>
         <p className="board-text">{post.body}</p>
         {post.images.length>0&&<div className="board-photos" data-count={post.images.length}>{post.images.map(key=><button type="button" key={key} onClick={()=>setViewing(key)} aria-label="Open photo full size"><img src={boardImage(key)} loading="lazy" alt="Shared on the team board"/></button>)}</div>}
-        <ReactionBar reactions={post.reactions} me={data.me} players={data.players} canReact={canTakePart} onReact={emoji=>react(post.id,emoji)}/>
-        {(post.comments.length>0||canTakePart)&&<div className="board-comments">{post.comments.map(c=>{const commenter=author(c.author);return <div className="board-comment" key={c.id}><Avatar p={commenter}/><div className="board-comment-body">
+        <ReactionBar reactions={post.reactions} me={data.me} players={data.players} onReact={emoji=>react(post.id,emoji)}/>
+        <div className="board-comments">{post.comments.map(c=>{const commenter=author(c.author);return <div className="board-comment" key={c.id}><Avatar p={commenter}/><div className="board-comment-body">
           <div className="board-comment-head"><strong><PlayerLink id={c.author} players={data.players} fallback="Former player"/></strong><small>{postedAgo(c.createdAt)}</small>{(c.author===data.me||data.isAdmin)&&<button type="button" className="text-btn remove-btn" aria-label="Delete comment" onClick={()=>remove('comment',c.id,c.author)}><Trash2 size={14}/></button>}</div>
           <p className="board-text">{c.body}</p>
           {c.image&&<button type="button" className="board-comment-photo" onClick={()=>setViewing(c.image!)} aria-label="Open photo full size"><img src={boardImage(c.image)} loading="lazy" alt="Shared in a comment"/></button>}
-          <ReactionBar reactions={c.reactions} me={data.me} players={data.players} canReact={canTakePart} onReact={emoji=>react(c.id,emoji)}/>
+          <ReactionBar reactions={c.reactions} me={data.me} players={data.players} onReact={emoji=>react(c.id,emoji)}/>
         </div></div>})}
-          {canTakePart&&(post.comments.length<BOARD_LIMITS.comments?<BoardComposer comment onPost={(body,photos)=>act({action:'comment',postId:post.id,body,images:photos})}/>:<p className="help">This post has reached {BOARD_LIMITS.comments} comments.</p>)}</div>}
+          {post.comments.length<BOARD_LIMITS.comments?<BoardComposer comment onPost={(body,photos)=>act({action:'comment',postId:post.id,body,images:photos})}/>:<p className="help">This post has reached {BOARD_LIMITS.comments} comments.</p>}</div>
       </article>})}
       {next&&<button type="button" className="secondary-btn mx-auto flex" disabled={loadingMore} onClick={loadMore}>{loadingMore?'Loading…':'Load older posts'}</button>}</div>}
     <Dialog open={!!viewing} onOpenChange={v=>{if(!v)setViewing('')}}><DialogContent className="dialog-panel wide"><DialogHeader><DialogTitle>Photo</DialogTitle><DialogDescription>Shared on the {teamInfo[team].name} board.</DialogDescription></DialogHeader>{viewing&&<img className="board-full-photo" src={boardImage(viewing)} alt="Shared on the team board, full size"/>}</DialogContent></Dialog>
   </div>
 }
-function ReactionBar({reactions,me,players,canReact,onReact}:{reactions:BoardReactions;me:string|null;players:Player[];canReact:boolean;onReact:(emoji:BoardReaction)=>void}){
-  const shown=BOARD_REACTIONS.filter(e=>canReact||reactions[e]?.length);
-  if(!shown.length)return null;
-  return <div className="reaction-bar">{shown.map(emoji=>{const who=reactions[emoji]??[],mine=!!me&&who.includes(me),names=who.map(id=>players.find(p=>p.id===id)?.name??'Former player').join(', ');
-    return <button type="button" key={emoji} className="reaction" aria-pressed={mine} disabled={!canReact} title={names||undefined} aria-label={emoji+(who.length?' '+who.length+': '+names:'')} onClick={()=>onReact(emoji)}><span aria-hidden="true">{emoji}</span>{who.length>0&&<small>{who.length}</small>}</button>})}</div>
+function ReactionBar({reactions,me,players,onReact}:{reactions:BoardReactions;me:string|null;players:Player[];onReact:(emoji:BoardReaction)=>void}){
+  return <div className="reaction-bar">{BOARD_REACTIONS.map(emoji=>{const who=reactions[emoji]??[],mine=!!me&&who.includes(me),names=who.map(id=>players.find(p=>p.id===id)?.name??'Former player').join(', ');
+    return <button type="button" key={emoji} className="reaction" aria-pressed={mine} title={names||undefined} aria-label={emoji+(who.length?' '+who.length+': '+names:'')} onClick={()=>onReact(emoji)}><span aria-hidden="true">{emoji}</span>{who.length>0&&<small>{who.length}</small>}</button>})}</div>
 }
 // Writes a post (up to four photos) or a comment (one photo). Photos are compressed on the device before upload.
 function BoardComposer({comment=false,onPost}:{comment?:boolean;onPost:(body:string,photos:File[])=>Promise<boolean>}){
@@ -606,7 +603,7 @@ function BoardComposer({comment=false,onPost}:{comment?:boolean;onPost:(body:str
       <button className="primary-btn" disabled={busy||!body.trim()}>{busy?'Sending…':comment?'Comment':'Post'}<Send/></button></div>
   </form>
 }
-// Formation builder: a team's saved line-ups of up to ten players on a vertical pitch. Its players and admins edit
+// Formation builder: a team's saved line-ups of up to ten players on a vertical pitch. Only its own players edit
 // them and the last save wins. Changes stay on this device until Save.
 type FormationDraft={name:string;slots:FormationSlot[]};
 const draftOf=({name,slots}:Formation):FormationDraft=>({name,slots});
