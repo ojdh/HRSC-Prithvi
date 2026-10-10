@@ -61,15 +61,15 @@ export default function PhoneApp() {
   return <div className="phone-app-tools">
     {offline && <span className="phone-offline" role="status"><WifiOff size={16}/><span>Offline · reconnect to save or vote</span></span>}
     {!installed && <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild><button className="phone-install" aria-label="Install HRSC–Prithvi app"><Smartphone size={18}/><span>Install app</span></button></DialogTrigger>
+      <DialogTrigger asChild><button className="phone-install" aria-label="Install Prithvi FC app"><Smartphone size={18}/><span>Install app</span></button></DialogTrigger>
       <DialogContent className="dialog-panel phone-install-dialog">
-        <div className="phone-app-heading"><img src="/icons/icon-192.png" width="64" height="64" alt=""/><span>HRSC–PRITHVI</span></div>
-        <DialogHeader><DialogTitle>One tap to your club.</DialogTitle><DialogDescription>Add HRSC–Prithvi to your home screen.</DialogDescription></DialogHeader>
+        <div className="phone-app-heading"><img src="/icons/icon-192.png" width="64" height="64" alt=""/><span>PRITHVI FC</span></div>
+        <DialogHeader><DialogTitle>One tap to your club.</DialogTitle><DialogDescription>Add Prithvi FC to your home screen.</DialogDescription></DialogHeader>
         {platform === 'ios' ? <ol className="phone-install-steps">
           <li>Open this website in <strong>Safari</strong>.</li>
           <li>Tap <Share size={16} aria-hidden="true"/> <strong>Share</strong>, then <strong>Add to Home Screen</strong>.</li>
           <li>Keep <strong>Open as Web App</strong> enabled if shown, then tap <strong>Add</strong>.</li>
-        </ol> : prompt ? <button className="primary-btn phone-install-primary" disabled={installing || offline} onClick={install}><Download size={18}/>{installing ? 'Opening…' : 'Install HRSC–Prithvi'}</button> : <ol className="phone-install-steps">
+        </ol> : prompt ? <button className="primary-btn phone-install-primary" disabled={installing || offline} onClick={install}><Download size={18}/>{installing ? 'Opening…' : 'Install Prithvi FC'}</button> : <ol className="phone-install-steps">
           {platform === 'android' ? <><li>Open this website in <strong>Chrome</strong>.</li><li>Tap the <strong>⋮ menu</strong>, then <strong>Add to Home screen</strong> or <strong>Install app</strong>.</li><li>Confirm <strong>Install</strong> or <strong>Add</strong>.</li></> : <><li>Open this website in <strong>Chrome, Edge or Safari</strong>.</li><li>Use <strong>Install app</strong> in the browser menu or address bar. In Safari on Mac, choose <strong>File → Add to Dock</strong>.</li></>}
         </ol>}
         {message && <p className="phone-install-note" role="status">{message}</p>}

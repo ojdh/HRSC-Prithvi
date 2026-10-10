@@ -8,9 +8,9 @@ import "./home.css";
 export const metadata: Metadata = {
   title: "Prithvi FC",
   description: "Prithvi FC. Club football, Winter league, match results and player profiles.",
-  applicationName: "HRSC–Prithvi",
+  applicationName: "Prithvi FC",
   manifest: "/manifest.webmanifest",
-  appleWebApp: { capable: true, title: "HRSC–Prithvi", statusBarStyle: "default" },
+  appleWebApp: { capable: true, title: "Prithvi FC", statusBarStyle: "default" },
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",
