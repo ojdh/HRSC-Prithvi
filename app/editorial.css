@@ -33,3 +33,4 @@ body{background:var(--background);color:var(--foreground);font:400 16px/1.45 'DM
 @media(max-width:767px){.next-up{padding:20px}}
 .keeper-field{display:grid;gap:4px;width:100%;font-size:12px;font-weight:700;color:var(--muted-foreground);text-align:left}.keeper-field [data-slot=select-trigger]{width:100%}.league-table abbr{text-decoration:none}
 @media(max-width:767px){.table-wrap .league-table{min-width:0;font-size:13px}.league-table td,.league-table th{padding:10px 3px!important}.league-table th{font-size:11px!important}.league-table :is(th,td):is(:nth-child(11),:nth-child(12)),.league-table .cell-team .team-crest{display:none}.league-table .cell-team{white-space:normal;gap:6px}.league-table .wins-cell{font-size:19px}}
+.end-day{margin-top:22px;padding-top:16px;border-top:1px dashed #c8dcbf;display:flex;flex-direction:column;align-items:flex-start;gap:8px}
