@@ -1,8 +1,8 @@
-// Team formations: up to ten markers on a vertical pitch, saved per team. x and y are fractions of the
+// Team formations: up to eleven markers on a vertical pitch, saved per team. x and y are fractions of the
 // pitch (0 is the left touchline and the top goal line, 1 the right and bottom), so a layout looks the same
 // at every screen size. A slot is a squad player (playerId) or a placeholder name (label), never both.
 // This module has no imports, so the server, the browser and the model tests share it as it is.
-export const FORMATION_LIMITS={slots:10,formations:10,name:40,label:30} as const;
+export const FORMATION_LIMITS={slots:11,formations:10,name:40,label:30} as const;
 // A point on the pitch as fractions, like a marker's x and y.
 export type PitchPoint={x:number;y:number};
 // A movement arrow runs from its player to where they should go: an attacking run or a defensive one.
@@ -12,8 +12,8 @@ export const RUN_KINDS:readonly RunKind[]=['attack','defend'];
 // defend are the arrowheads of the player's runs; formations saved before arrows have neither.
 export type FormationSlot={id:string;playerId:string|null;label:string|null;x:number;y:number;attack?:PitchPoint|null;defend?:PitchPoint|null;former?:boolean};
 export type Formation={id:string;name:string;slots:FormationSlot[];updatedBy:string;updatedAt:number};
-// Where new markers go, in order: the goalkeeper at the bottom, then defence, midfield and attack.
-export const SPOTS:readonly (readonly [number,number])[]=[[0.5,0.9],[0.2,0.72],[0.4,0.75],[0.6,0.75],[0.8,0.72],[0.3,0.5],[0.5,0.52],[0.7,0.5],[0.35,0.27],[0.65,0.27]];
+// Where new markers go, in order: the goalkeeper at the bottom, then defence, midfield and attack, as a 4-3-3.
+export const SPOTS:readonly (readonly [number,number])[]=[[0.5,0.9],[0.2,0.72],[0.4,0.75],[0.6,0.75],[0.8,0.72],[0.3,0.5],[0.5,0.52],[0.7,0.5],[0.2,0.28],[0.8,0.28],[0.5,0.22]];
 // How far one arrow-key press moves a focused marker.
 export const KEY_STEP=0.02;
 // A touch or pen held this long without moving opens a marker's menu; moving further than slop pixels first is a drag.
