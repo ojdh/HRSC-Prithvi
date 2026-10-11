@@ -842,7 +842,7 @@ try{
     const ownerId=await setUp(chats);
     const redId=await linkMember(chats,'Chat red','red','chat-red');
     await linkMember(chats,'Chat red two','red','chat-red2');
-    await linkMember(chats,'Chat black','black','chat-black');
+    const blackId=await linkMember(chats,'Chat black','black','chat-black');
     await clubCall(chats,'archivePlayer',{playerId:await linkMember(chats,'Chat gone','white','chat-gone')});
     const readChat=async(user,team,query={})=>{const r=await chats.dispatchFetch(origin+'/api/chat?'+new URLSearchParams({team,...query}),{headers:user?await headers(user):{}});return {status:r.status,data:r.status===200?await r.json():null}};
     const chatSend=async(user,body,extra={})=>{const r=await chats.dispatchFetch(origin+'/api/chat',{method:'POST',headers:{...await headers(user),...extra},body:JSON.stringify(body)});return {status:r.status,data:await r.json()}};
@@ -901,6 +901,19 @@ try{
     const log=await adminLog();
     ok(log.length===1&&log[0].action==='removeMessage'&&log[0].by===ownerId&&log[0].team==='red'&&log[0].author===redId,'the removal is logged with who, which team and the author');
     ok(!JSON.stringify(log).includes('Secret team talk'),'the log never records the message text');
+    // Admin chat: the owner and admins from every team; nobody else
+    await clubCall(chats,'setAdmin',{playerId:blackId,admin:true});
+    ok((await say('owner','admins','Who has the bibs?')).status===200,'the owner writes in the admin chat');
+    const adminChat=await readChat('chat-black','admins'),bibs=adminChat.data?.messages[0];
+    ok(adminChat.status===200&&bibs.body==='Who has the bibs?'&&bibs.author===ownerId,'an admin on another team reads the admin chat');
+    ok((await say('chat-black','admins','I do')).status===200,'an admin on another team writes in the admin chat');
+    ok((await readChat('chat-red','admins')).status===403&&(await say('chat-red','admins','Let me in')).status===403,'players who are not admins cannot open the admin chat');
+    ok((await readChat(null,'admins')).status===401,'the admin chat needs sign-in');
+    ok((await chatSend('chat-black',{action:'delete',messageId:bibs.id})).status===403,'in the admin chat, admins delete only their own messages');
+    ok((await chatSend('owner',{action:'delete',messageId:bibs.id})).status===200&&!(await readChat('owner','admins')).data.messages.some(m=>m.id===bibs.id),'the author deletes their own admin chat message');
+    ok((await adminLog()).length===1,'deleting your own admin chat message is not logged');
+    await clubCall(chats,'setAdmin',{playerId:blackId,admin:false});
+    ok((await readChat('chat-black','admins')).status===403,'an admin who loses the role loses the admin chat');
     await say('chat-black','black','Black only');
     const blackMessage=(await readChat('chat-black','black')).data.messages[0];
     ok((await chatSend('owner',{action:'delete',messageId:blackMessage.id})).status===403,'an admin cannot remove messages from another team’s chat');

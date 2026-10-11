@@ -1,5 +1,5 @@
 import { getUser } from '../../auth';
-import { CHAT_LIMITS } from '@/lib/club';
+import { ADMIN_CHAT, CHAT_LIMITS } from '@/lib/club';
 import { ClubError, check } from '@/lib/server-club';
 import { readJson, readText } from '@/lib/server-forms';
 import { boardViewer, logRemoval } from '@/lib/server-board';
@@ -21,7 +21,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     check(req.headers.get('origin') === new URL(req.url).origin, 'This request must come from the club website.', 403);
-    check(req.headers.get('content-type')?.startsWith('application/json'), 'Team chat takes text messages only.', 415);
+    check(req.headers.get('content-type')?.startsWith('application/json'), 'Chat takes text messages only.', 415);
     const viewer = await boardViewer(await getUser());
     const me = viewer.me;
     check(me, 'Connect your player profile before using the team chat.', 403);
@@ -33,8 +33,11 @@ export async function POST(req: Request) {
     if (body.action === 'delete') {
       const message = await findMessage(body.messageId);
       openChat(viewer, message.team);
-      check(message.author === me.id || viewer.admin, 'You can only delete your own messages.', 403);
-      if (message.author !== me.id) await logRemoval(viewer, me.id, 'removeMessage', message.team, message.author);
+      // Admins moderate team chats; in the admin chat everyone is an admin, so each deletes only their own.
+      if (message.author !== me.id) {
+        check(viewer.admin && message.team !== ADMIN_CHAT, 'You can only delete your own messages.', 403);
+        await logRemoval(viewer, me.id, 'removeMessage', message.team, message.author);
+      }
       await deleteMessage(message);
       return Response.json({ ok: true });
     }
@@ -46,5 +49,5 @@ export async function POST(req: Request) {
 function failure(e: unknown) {
   if (e instanceof ClubError) return Response.json({ error: e.message }, { status: e.status });
   console.error('Chat request failed', e instanceof Error ? e.name : 'unknown');
-  return Response.json({ error: 'The team chat could not be updated. Please try again.' }, { status: 503 });
+  return Response.json({ error: 'The chat could not be updated. Please try again.' }, { status: 503 });
 }

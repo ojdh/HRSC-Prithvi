@@ -1,4 +1,4 @@
-import { CHAT_LIMITS, type ChatPage, type Team } from './club';
+import { ADMIN_CHAT, CHAT_LIMITS, type ChatPage, type ChatRoom } from './club';
 import { openTeamSpace, type BoardViewer } from './server-board';
 import { check, db } from './server-club';
 
@@ -6,8 +6,11 @@ const MINUTE = 60_000;
 export const CHAT_RETENTION_MS = 90 * 24 * 60 * MINUTE;
 type MessageRow = { id: string; author: string; body: string; created_at: number };
 
-export function openChat(viewer: BoardViewer, team: unknown): Team {
-  return openTeamSpace(viewer, team, 'Team chat not found.', 'This chat belongs to another team.');
+// A team chat opens like the team's board; the admin chat opens to the owner and active admins from every team.
+export function openChat(viewer: BoardViewer, room: unknown): ChatRoom {
+  if (room !== ADMIN_CHAT) return openTeamSpace(viewer, room, 'Team chat not found.', 'This chat belongs to another team.');
+  check(viewer.admin, 'Only admins can open the admin chat.', 403);
+  return ADMIN_CHAT;
 }
 
 // Seconds until the client's next poll: quick while a conversation is going, slower as the chat goes quiet.
@@ -21,7 +24,7 @@ export function refreshIn(lastMessageAt: number | null) {
 // `before` pages to older messages; `since` is the oldest message a client has loaded, and a changed chat
 // then returns every message from the newest down to it (up to CHAT_LIMITS.window), so messages deleted
 // or expired anywhere in what the client shows drop out.
-export async function chatPage(team: Team, known: string | null, before: string | null, since: string | null): Promise<ChatPage> {
+export async function chatPage(team: ChatRoom, known: string | null, before: string | null, since: string | null): Promise<ChatPage> {
   check(known === null || /^\d{1,15}$/.test(known), 'Refresh the chat to catch up.');
   const older = readCursor(before), from = readCursor(since);
   check(!(older && from), 'Refresh the chat to load older messages.');
@@ -50,7 +53,7 @@ function readCursor(cursor: string | null) {
   return { createdAt: Number(parts[1]), id: parts[2] };
 }
 
-export async function sendMessage(team: Team, author: string, body: string) {
+export async function sendMessage(team: ChatRoom, author: string, body: string) {
   const id = crypto.randomUUID(), now = Date.now();
   await db().batch([
     db().prepare('INSERT INTO chat_messages(id,team,author,body,created_at) VALUES(?,?,?,?,?)').bind(id, team, author, body, now),
@@ -60,12 +63,12 @@ export async function sendMessage(team: Team, author: string, body: string) {
 }
 
 export async function findMessage(id: unknown) {
-  const message = typeof id === 'string' ? await db().prepare('SELECT id,team,author FROM chat_messages WHERE id=?').bind(id).first<{ id: string; team: Team; author: string }>() : null;
+  const message = typeof id === 'string' ? await db().prepare('SELECT id,team,author FROM chat_messages WHERE id=?').bind(id).first<{ id: string; team: ChatRoom; author: string }>() : null;
   check(message, 'This message was removed. Refresh the chat.', 404);
   return message;
 }
 
-export async function deleteMessage(message: { id: string; team: Team }) {
+export async function deleteMessage(message: { id: string; team: ChatRoom }) {
   const [removed] = await db().batch([
     db().prepare('DELETE FROM chat_messages WHERE id=?').bind(message.id),
     db().prepare('UPDATE chat_state SET version=version+1 WHERE team=?').bind(message.team),
