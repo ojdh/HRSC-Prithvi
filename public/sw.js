@@ -1,7 +1,10 @@
 // Prithvi FC service worker. It caches only the offline page and the app icons, never pages, API
 // answers, invitations, votes or member media, and it shows chat notifications.
-const CACHE = 'prithvi-shell-v1';
-const SHELL = ['/offline.html', '/icons/icon-192.png', '/favicon.svg'];
+const CACHE = 'prithvi-shell-v2';
+// Cloudflare serves public/offline.html at /offline (its .html address redirects there), and a page load cannot be
+// answered with a redirected response, so the worker caches and serves /offline.
+const OFFLINE = '/offline';
+const SHELL = [OFFLINE, '/icons/icon-192.png', '/favicon.svg'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -16,7 +19,7 @@ self.addEventListener('activate', event => {
 // A page that cannot load while offline shows the reconnect screen; every other request goes to the network untouched.
 self.addEventListener('fetch', event => {
   if (event.request.mode !== 'navigate') return;
-  event.respondWith(fetch(event.request).catch(() => caches.match('/offline.html')));
+  event.respondWith(fetch(event.request).catch(() => caches.match(OFFLINE)));
 });
 
 // Pushes carry only a title, generic text, a tag (one notification per chat) and an in-app address.

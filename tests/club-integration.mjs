@@ -954,6 +954,10 @@ try{
   for(const icon of manifest.icons)ok(pngSize(await readFile('dist/client'+icon.src))===icon.sizes,'icon '+icon.src+' is '+icon.sizes);
   ok(pngSize(await readFile('dist/client/icons/apple-touch-icon.png'))==='180x180','the apple touch icon is 180 px');
   for(const path of ['/sw.js','/offline.html'])ok((await stat('dist/client'+path)).size>0,'the build ships '+path);
+  // Cloudflare serves static .html files without the extension (offline.html at /offline, redirecting the .html
+  // address), and a page load cannot be answered with a redirected response, so the worker must cache /offline itself.
+  const serviceWorker=await readFile('dist/client/sw.js','utf8');
+  ok(serviceWorker.includes("'/offline'")&&!serviceWorker.includes("'/offline.html'"),'the service worker caches the offline page at the address Cloudflare serves it from');
   // Phone notifications: Web Push to the push services, signed with the club's VAPID key and encrypted for each device.
   const subtle=crypto.subtle;
   const vapidPair=await subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
