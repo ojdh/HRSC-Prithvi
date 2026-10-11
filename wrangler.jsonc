@@ -1,6 +1,6 @@
 // Production Worker configuration for prithvifc.ca, provisioned as described in
 // README "Deploying to Cloudflare". None of these values are secrets;
-// CLUB_SETUP_KEY, CF_ACCOUNT_ID and CF_API_TOKEN are set with `wrangler secret put`.
+// CLUB_SETUP_KEY, CF_ACCOUNT_ID, CF_API_TOKEN and VAPID_PRIVATE_KEY are set with `wrangler secret put`.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "hrsc-prithvi",
@@ -33,6 +33,9 @@
     // the "Club members" Access group. CF_ACCOUNT_ID and CF_API_TOKEN are secrets;
     // while either is missing, such invites fail with "Access sync isn't
     // configured". See docs/cloudflare.md "Access sync on invite".
-    "CF_ACCESS_GROUP_ID": "5d25cb40-e308-43c6-9731-d34436be0b72"
+    "CF_ACCESS_GROUP_ID": "5d25cb40-e308-43c6-9731-d34436be0b72",
+    // Phone notifications (lib/server-push.ts): the public half of the VAPID key pair. The private half is
+    // the VAPID_PRIVATE_KEY secret; while it is missing, notifications cannot be turned on.
+    "VAPID_PUBLIC_KEY": "BNglaj3pnfSQaEbqu25WnOQgAXYe2KwqzjzeSr9N49p1eAJHzZdUZhaJi3IOTHoL0Ngjgv6-KZC4lZ9-oQAkZk0"
   }
 }

@@ -1,0 +1,15 @@
+{
+  "name": "Prithvi FC",
+  "short_name": "Prithvi FC",
+  "description": "Prithvi FC's Winter league: matchdays, results, votes and team chat.",
+  "start_url": "/winterleague",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#e6f2df",
+  "theme_color": "#e6f2df",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

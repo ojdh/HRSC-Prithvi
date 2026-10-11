@@ -374,6 +374,8 @@ footer{color:var(--muted);font-size:.9rem;margin-top:48px;border-top:1px solid v
     <tr><td><code>CLUB_SETUP_KEY</code></td><td>Yes</td><td>Worker secret, plus a private file for the organiser</td></tr>
     <tr><td>Account ID</td><td>Not strictly, but not published</td><td>GitHub repo secret, and the <code>CF_ACCOUNT_ID</code> Worker secret for Access sync</td></tr>
     <tr><td>Club members Access group ID</td><td>No</td><td><code>CF_ACCESS_GROUP_ID</code> in <code>wrangler.jsonc</code></td></tr>
+    <tr><td><code>VAPID_PRIVATE_KEY</code> (signs phone notifications)</td><td>Yes</td><td>Worker secret only</td></tr>
+    <tr><td><code>VAPID_PUBLIC_KEY</code> (the browser needs it to subscribe)</td><td>No</td><td><code>wrangler.jsonc</code></td></tr>
     <tr><td>D1 database ID, Access team URL, AUD tag, R2 limits</td><td>No</td><td><code>wrangler.jsonc</code> (they identify resources and grant no access)</td></tr>
   </tbody>
 </table></div>

@@ -24,3 +24,5 @@ export const formations = sqliteTable('formations',{id:text('id').primaryKey(),t
 export const chatMessages = sqliteTable('chat_messages',{id:text('id').primaryKey(),team:text('team').notNull(),author:text('author').notNull(),body:text('body').notNull(),createdAt:integer('created_at').notNull()},t=>[index('idx_chat_messages_team').on(t.team,t.createdAt)]);
 // One row per team chat. version moves on every send and delete, so a poll at the current version reads nothing else.
 export const chatState = sqliteTable('chat_state',{team:text('team').primaryKey(),version:integer('version').notNull().default(0),lastMessageAt:integer('last_message_at')});
+// Phone notifications: one Web Push subscription per player, so turning them on on a new device replaces the old one.
+export const pushSubscriptions = sqliteTable('push_subscriptions',{player:text('player').primaryKey(),endpoint:text('endpoint').notNull(),p256dh:text('p256dh').notNull(),auth:text('auth').notNull(),createdAt:integer('created_at').notNull()});

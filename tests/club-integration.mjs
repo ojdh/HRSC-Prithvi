@@ -1,7 +1,7 @@
 // Runs against an isolated Worker/D1/R2 emulator. Never touches the hosted club.
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
-import {mkdtemp,readFile,readdir,rm} from 'node:fs/promises';
+import {mkdtemp,readFile,readdir,rm,stat} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 const require=createRequire(import.meta.url);
@@ -946,6 +946,123 @@ try{
     ok(!!(await chatDb.prepare('SELECT 1 AS found FROM chat_messages WHERE body=?').bind('Message 1').first()),'messages younger than 90 days are kept');
     ok(await r2Used()===0&&await storedObjects(chats)===0,'chat never touches R2');
   }finally{await chats.dispose()}
+  // The installable app: manifest, icons, service worker and offline page ship with the build.
+  const manifest=JSON.parse(await readFile('dist/client/manifest.webmanifest','utf8'));
+  ok(manifest.name==='Prithvi FC'&&manifest.start_url==='/winterleague'&&manifest.scope==='/'&&manifest.display==='standalone','the manifest launches the Winter league as a standalone app');
+  ok(manifest.icons.some(i=>i.sizes==='192x192')&&manifest.icons.some(i=>i.sizes==='512x512'&&i.purpose==='maskable'),'the manifest lists 192 px, 512 px and maskable icons');
+  const pngSize=bytes=>bytes.readUInt32BE(16)+'x'+bytes.readUInt32BE(20);
+  for(const icon of manifest.icons)ok(pngSize(await readFile('dist/client'+icon.src))===icon.sizes,'icon '+icon.src+' is '+icon.sizes);
+  ok(pngSize(await readFile('dist/client/icons/apple-touch-icon.png'))==='180x180','the apple touch icon is 180 px');
+  for(const path of ['/sw.js','/offline.html'])ok((await stat('dist/client'+path)).size>0,'the build ships '+path);
+  // Phone notifications: Web Push to the push services, signed with the club's VAPID key and encrypted for each device.
+  const subtle=crypto.subtle;
+  const vapidPair=await subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
+  const vapid={VAPID_PUBLIC_KEY:b64url(new Uint8Array(await subtle.exportKey('raw',vapidPair.publicKey))),VAPID_PRIVATE_KEY:(await subtle.exportKey('jwk',vapidPair.privateKey)).d};
+  // A stand-in browser: its push subscription keys, as PushSubscription.toJSON() gives them.
+  async function browserSubscription(endpoint){const keys=await subtle.generateKey({name:'ECDH',namedCurve:'P-256'},true,['deriveBits']),auth=crypto.getRandomValues(new Uint8Array(16));return {json:{endpoint,keys:{p256dh:b64url(new Uint8Array(await subtle.exportKey('raw',keys.publicKey))),auth:b64url(auth)}},keys,auth}}
+  const hmac=async(key,bytes)=>new Uint8Array(await subtle.sign('HMAC',await subtle.importKey('raw',key,{name:'HMAC',hash:'SHA-256'},false,['sign']),bytes));
+  const joined=(...parts)=>Buffer.concat(parts.map(part=>Buffer.from(part)));
+  // Decrypts an aes128gcm push body as the browser would (RFC 8291).
+  async function decryptPush(body,device){
+    const salt=body.subarray(0,16),idLength=body[20],serverKey=body.subarray(21,21+idLength),ciphertext=body.subarray(21+idLength);
+    const deviceKey=new Uint8Array(await subtle.exportKey('raw',device.keys.publicKey));
+    const shared=new Uint8Array(await subtle.deriveBits({name:'ECDH',public:await subtle.importKey('raw',serverKey,{name:'ECDH',namedCurve:'P-256'},false,[])},device.keys.privateKey,256));
+    const ikm=await hmac(await hmac(device.auth,shared),joined('WebPush: info\0',deviceKey,serverKey,[1])),prk=await hmac(salt,ikm);
+    const key=(await hmac(prk,joined('Content-Encoding: aes128gcm\0',[1]))).subarray(0,16),nonce=(await hmac(prk,joined('Content-Encoding: nonce\0',[1]))).subarray(0,12);
+    const plain=new Uint8Array(await subtle.decrypt({name:'AES-GCM',iv:nonce},await subtle.importKey('raw',key,'AES-GCM',false,['decrypt']),ciphertext));
+    let end=plain.length-1;while(plain[end]===0)end--;
+    assert.equal(plain[end],2,'the last record ends with the 0x02 delimiter');
+    return JSON.parse(Buffer.from(plain.subarray(0,end)).toString());
+  }
+  async function signedByClub(header,endpoint){
+    const match=/^vapid t=([^,]+), k=(.+)$/.exec(header??'');if(!match)return false;
+    const [head,claims,signature]=match[1].split('.'),key=await subtle.importKey('raw',Buffer.from(vapid.VAPID_PUBLIC_KEY,'base64url'),{name:'ECDSA',namedCurve:'P-256'},false,['verify']);
+    const body=JSON.parse(Buffer.from(claims,'base64url')),now=Date.now()/1000;
+    return match[2]===vapid.VAPID_PUBLIC_KEY&&await subtle.verify({name:'ECDSA',hash:'SHA-256'},key,Buffer.from(signature,'base64url'),Buffer.from(head+'.'+claims))&&body.aud===new URL(endpoint).origin&&body.sub==='https://prithvifc.ca'&&body.exp>now&&body.exp<=now+86400;
+  }
+  // The push service: records every push; an endpoint ending in /gone answers 410 like an expired subscription.
+  const pushed=[];
+  const pushService=async req=>{const url=new URL(req.url);if(url.hostname!=='fcm.googleapis.com')return accessService(req);pushed.push({endpoint:req.url,headers:Object.fromEntries(req.headers),body:Buffer.from(await req.arrayBuffer())});return new Response(null,{status:url.pathname.endsWith('/gone')?410:201})};
+  const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+  const settle=async count=>{for(let i=0;i<60&&pushed.length<count;i++)await pause(50);await pause(200)};
+  const fcm=id=>'https://fcm.googleapis.com/fcm/send/'+id;
+  const pushes=new Miniflare({...workerOptions,outboundService:pushService,bindings:{...accessBindings,...budget({storage:1e9,classA:1e6,classB:1e7}),...vapid}});
+  try{
+    await setUp(pushes);
+    const redId=await linkMember(pushes,'Push red','red','push-red'),red2Id=await linkMember(pushes,'Push red two','red','push-red2'),blackId=await linkMember(pushes,'Push black','black','push-black');
+    const pushApi=async(user,body,extra={})=>{const r=await pushes.dispatchFetch(origin+'/api/push',{method:'POST',headers:{...await headers(user),...extra},body:JSON.stringify(body)});return {status:r.status,data:await r.json()}};
+    const pushStatus=async(user,endpoint)=>{const r=await pushes.dispatchFetch(origin+'/api/push?endpoint='+encodeURIComponent(endpoint),{headers:await headers(user)});return {status:r.status,data:await r.json()}};
+    const chatSay=async(user,team,body)=>(await pushes.dispatchFetch(origin+'/api/chat',{method:'POST',headers:await headers(user),body:JSON.stringify({action:'send',team,body})})).status;
+    const pushDb=await pushes.getD1Database('DB');
+    const rows=async()=>(await pushDb.prepare('SELECT player,endpoint FROM push_subscriptions').all()).results;
+    const quiet=team=>pushDb.prepare('UPDATE chat_state SET last_message_at=? WHERE team=?').bind(Date.now()-6*60_000,team).run();
+    const device={};for(const [user,id] of [['owner','owner'],['push-red','red'],['push-red2','red2'],['push-black','black']])device[user]=await browserSubscription(fcm(id));
+    // Turning notifications on
+    for(const user of Object.keys(device))ok((await pushApi(user,{action:'subscribe',subscription:device[user].json})).status===200,'a player turns on notifications: '+user);
+    const status=await pushStatus('push-red2',device['push-red2'].json.endpoint);
+    ok(status.status===200&&status.data.enabled===true&&status.data.thisDevice===true,'the status says notifications are on for this device');
+    ok((await pushApi(null,{action:'subscribe',subscription:device.owner.json})).status===401,'notifications need sign-in');
+    ok((await pushApi('intruder',{action:'subscribe',subscription:device.owner.json})).status===403,'non-members cannot turn on notifications');
+    ok((await pushApi('push-red',{action:'subscribe',subscription:device['push-red'].json},{Origin:'https://evil.test'})).status===403,'cross-site subscriptions are refused');
+    for(const endpoint of ['http://fcm.googleapis.com/fcm/send/x','https://evil.test/push','https://fcm.googleapis.com.evil.test/x','https://169.254.169.254/latest'])
+      ok((await pushApi('push-red',{action:'subscribe',subscription:{...device['push-red'].json,endpoint}})).status===400,'only known push services are accepted: '+endpoint);
+    ok((await pushApi('push-red',{action:'subscribe',subscription:{...device['push-red'].json,keys:{p256dh:'abc',auth:'abc'}}})).status===400,'subscription keys must be valid');
+    ok((await rows()).length===4&&(await rows()).find(r=>r.player===redId).endpoint===fcm('red'),'refused subscriptions change nothing');
+    // One device per player
+    const laptop=await browserSubscription(fcm('red2-laptop'));
+    ok((await pushApi('push-red2',{action:'subscribe',subscription:laptop.json})).status===200,'a player turns on notifications on a second device');
+    const red2Rows=(await rows()).filter(r=>r.player===red2Id);
+    ok(red2Rows.length===1&&red2Rows[0].endpoint===laptop.json.endpoint,'the second device replaces the first');
+    const elsewhere=(await pushStatus('push-red2',device['push-red2'].json.endpoint)).data;
+    ok(elsewhere.enabled===true&&elsewhere.thisDevice===false,'the first device sees notifications are on elsewhere');
+    device['push-red2']=laptop;
+    // A quiet team chat wakes up: each subscribed teammate gets one generic notification
+    const teamName=(await (await pushes.dispatchFetch(origin+'/api/club',{headers:await headers('owner')})).json()).teams.red.name;
+    ok(await chatSay('push-red','red','Pitch booked for 7')===200,'a player writes in a quiet team chat');
+    await settle(2);
+    const firstWave=pushed.splice(0);
+    ok(firstWave.map(p=>p.endpoint).sort().join()===[fcm('owner'),fcm('red2-laptop')].sort().join(),'teammates with notifications on are told, not the sender or other teams: '+firstWave.map(p=>p.endpoint));
+    for(const p of firstWave){
+      const owner=Object.values(device).find(d=>d.json.endpoint===p.endpoint),note=await decryptPush(p.body,owner);
+      ok(JSON.stringify(note)===JSON.stringify({title:'Prithvi FC',body:'New message in '+teamName+' chat',tag:'chat-red',url:'/winterleague?view=teams&tab=chat&team=red'}),'the notification names only the chat: '+JSON.stringify(note));
+      ok(p.headers['content-encoding']==='aes128gcm'&&Number(p.headers.ttl)>0,'pushes are aes128gcm-encrypted with a time to live');
+      ok(await signedByClub(p.headers.authorization,p.endpoint),'pushes are signed with the club’s VAPID key');
+    }
+    // Once per burst
+    ok(await chatSay('push-red2','red','On my way')===200,'a reply in the ongoing conversation');
+    await pause(500);
+    ok(pushed.length===0,'messages in an ongoing conversation do not notify again');
+    await quiet('red');
+    ok(await chatSay('owner','red','Anyone there?')===200,'a message after five quiet minutes');
+    await settle(2);
+    ok(pushed.splice(0).map(p=>p.endpoint).sort().join()===[fcm('red'),fcm('red2-laptop')].sort().join(),'a chat quiet for five minutes notifies again');
+    // Admin chat: admins only
+    await clubCall(pushes,'setAdmin',{playerId:blackId,admin:true});
+    ok(await chatSay('push-black','admins','Who has the bibs?')===200,'an admin writes in the admin chat');
+    await settle(1);
+    const adminWave=pushed.splice(0);
+    ok(adminWave.length===1&&adminWave[0].endpoint===fcm('owner'),'the admin chat notifies the other admins only: '+adminWave.map(p=>p.endpoint));
+    const adminNote=await decryptPush(adminWave[0].body,device.owner);
+    ok(adminNote.body==='New message in Admin chat'&&adminNote.tag==='chat-admins'&&adminNote.url==='/winterleague?view=profile&tab=admin','the admin chat notification opens Club admin');
+    // A subscription the push service reports gone is removed
+    const gone=await browserSubscription(fcm('gone'));
+    ok((await pushApi('push-red',{action:'subscribe',subscription:gone.json})).status===200,'a device that later expires');
+    await quiet('red');
+    await chatSay('owner','red','Still on?');
+    await settle(2);pushed.splice(0);
+    ok(!(await rows()).some(r=>r.player===redId),'a subscription answered with 410 Gone is deleted');
+    // Turning notifications off
+    ok((await pushApi('push-red2',{action:'unsubscribe'})).status===200&&!(await rows()).some(r=>r.player===red2Id),'a player turns notifications off');
+    ok((await pushStatus('push-red2',laptop.json.endpoint)).data.enabled===false,'the status says notifications are off');
+  }finally{await pushes.dispose()}
+  // Without the VAPID keys, notifications fail closed and chat still works.
+  const unkeyed=new Miniflare({...workerOptions,outboundService:pushService,bindings:{...accessBindings,...budget({storage:1e9,classA:1e6,classB:1e7})}});
+  try{
+    await setUp(unkeyed);
+    const refusedSubscribe=await unkeyed.dispatchFetch(origin+'/api/push',{method:'POST',headers:await headers('owner'),body:JSON.stringify({action:'subscribe',subscription:(await browserSubscription(fcm('unkeyed'))).json})});
+    ok(refusedSubscribe.status===503,'notifications cannot be turned on until the keys are set');
+    ok((await unkeyed.dispatchFetch(origin+'/api/chat',{method:'POST',headers:await headers('owner'),body:JSON.stringify({action:'send',team:'red',body:'Hello'})})).status===200,'chat still works without the keys');
+  }finally{await unkeyed.dispose()}
   // Team formations: private to the team's own players, admins included only for their own team; the last save wins.
   const formations=new Miniflare({...workerOptions,bindings:{...accessBindings,...budget({storage:1e9,classA:1e6,classB:1e7})}});
   try{

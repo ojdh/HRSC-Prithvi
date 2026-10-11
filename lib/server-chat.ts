@@ -4,6 +4,8 @@ import { check, db } from './server-club';
 
 const MINUTE = 60_000;
 export const CHAT_RETENTION_MS = 90 * 24 * 60 * MINUTE;
+// A message after this long without one wakes the chat up, which is when its members get a notification.
+const WAKE_AFTER_MS = 5 * MINUTE;
 type MessageRow = { id: string; author: string; body: string; created_at: number };
 
 // A team chat opens like the team's board; the admin chat opens to the owner and active admins from every team.
@@ -53,13 +55,17 @@ function readCursor(cursor: string | null) {
   return { createdAt: Number(parts[1]), id: parts[2] };
 }
 
+// Stores the message and says whether it woke the chat up: no message before it for WAKE_AFTER_MS.
+// The previous message time is read in the same transaction as the update.
 export async function sendMessage(team: ChatRoom, author: string, body: string) {
   const id = crypto.randomUUID(), now = Date.now();
-  await db().batch([
+  const [before] = await db().batch([
+    db().prepare('SELECT last_message_at FROM chat_state WHERE team=?').bind(team),
     db().prepare('INSERT INTO chat_messages(id,team,author,body,created_at) VALUES(?,?,?,?,?)').bind(id, team, author, body, now),
     db().prepare('INSERT INTO chat_state(team,version,last_message_at) VALUES(?1,1,?2) ON CONFLICT(team) DO UPDATE SET version=version+1,last_message_at=?2').bind(team, now),
   ]);
-  return id;
+  const previous = (before.results as { last_message_at: number | null }[])[0]?.last_message_at ?? null;
+  return { id, wokeUp: previous === null || now - previous >= WAKE_AFTER_MS };
 }
 
 export async function findMessage(id: unknown) {

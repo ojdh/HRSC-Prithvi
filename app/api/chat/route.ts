@@ -1,9 +1,11 @@
+import { waitUntil } from 'cloudflare:workers';
 import { getUser } from '../../auth';
 import { ADMIN_CHAT, CHAT_LIMITS } from '@/lib/club';
 import { ClubError, check } from '@/lib/server-club';
 import { readJson, readText } from '@/lib/server-forms';
 import { boardViewer, logRemoval } from '@/lib/server-board';
 import { chatPage, deleteMessage, findMessage, openChat, sendMessage } from '@/lib/server-chat';
+import { notifyChat } from '@/lib/server-push';
 export const dynamic = 'force-dynamic';
 
 // One message of the longest allowed length, escaped as JSON, fits well inside this.
@@ -28,7 +30,10 @@ export async function POST(req: Request) {
     const body = await readJson(req, MAX_REQUEST_BYTES, `Keep it to ${CHAT_LIMITS.message} characters or fewer.`);
     if (body.action === 'send') {
       const team = openChat(viewer, body.team);
-      return Response.json({ ok: true, id: await sendMessage(team, me.id, readText(body.body, CHAT_LIMITS.message)) });
+      const { id, wokeUp } = await sendMessage(team, me.id, readText(body.body, CHAT_LIMITS.message));
+      // Notifications go out after the reply, so sending never waits on the push services.
+      if (wokeUp) waitUntil(notifyChat(viewer.club, team, me.id));
+      return Response.json({ ok: true, id });
     }
     if (body.action === 'delete') {
       const message = await findMessage(body.messageId);
