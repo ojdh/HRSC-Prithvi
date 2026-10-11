@@ -288,6 +288,8 @@ The placeholder check first used `grep REPLACE_WITH_ wrangler.jsonc`. That also 
 | `CLUB_SETUP_KEY` | Yes | Worker secret, plus a private file for the organiser |
 | Account ID | Not strictly, but not published | GitHub repo secret, and the `CF_ACCOUNT_ID` Worker secret for Access sync |
 | Club members Access group ID | No | `CF_ACCESS_GROUP_ID` in `wrangler.jsonc` |
+| `VAPID_PRIVATE_KEY` (signs phone notifications) | Yes | Worker secret only |
+| `VAPID_PUBLIC_KEY` (the browser needs it to subscribe) | No | `wrangler.jsonc` |
 | D1 database ID, Access team URL, AUD tag, R2 limits | No | `wrangler.jsonc` (they identify resources and grant no access) |
 
 ### 11. Done and still to do
