@@ -23,11 +23,11 @@ export const DELETION_APPROVALS=3;
 // A game as the edit log records it: the score, goals and keepers, without the lineup.
 export type RoundSnapshot = Pick<Round,'a'|'b'|'scoreA'|'scoreB'|'winner'|'exit'|'goals'|'keepers'>;
 export type DayLogAction = 'editRound'|'undoRound'|'requestDayDeletion'|'approveDayDeletion'|'cancelDayDeletion'|'deleteDay';
-export type BoardLogAction = 'removePost'|'removeComment';
+export type BoardLogAction = 'removePost'|'removeComment'|'removeMessage';
 export type LogAction = DayLogAction|BoardLogAction;
 // Admin-only history of corrections and deletions, newest first. by is a player id; date keeps an entry readable once its day is gone.
 export type DayLogEntry = {id:string;at:string;by:string;action:DayLogAction;dayId:string;date:string;roundId?:string;before?:RoundSnapshot;after?:RoundSnapshot};
-// An admin removing someone else's board post or comment. author is a player id; the text is never kept.
+// An admin removing someone else's board post, board comment or chat message. author is a player id; the text is never kept.
 export type BoardLogEntry = {id:string;at:string;by:string;action:BoardLogAction;team:Team;author:string};
 export type LogEntry = DayLogEntry|BoardLogEntry;
 export const LOG_LIMIT=500;
@@ -41,6 +41,11 @@ export type BoardComment={id:string;author:string;body:string;createdAt:number;i
 export type BoardPost={id:string;team:Team;author:string;body:string;createdAt:number;images:string[];reactions:BoardReactions;comments:BoardComment[]};
 // next is the cursor for the following page, or null on the last page.
 export type BoardPage={posts:BoardPost[];next:string|null};
+// Team chats: each team's private, text-only conversation. version moves on every send and delete;
+// refreshIn is how many seconds the server asks the client to wait before its next poll.
+export const CHAT_LIMITS={message:1000,page:50} as const;
+export type ChatMessage={id:string;author:string;body:string;createdAt:number};
+export type ChatPage={version:number;refreshIn:number}&({unchanged:true}|{unchanged?:undefined;messages:ChatMessage[];next:string|null});
 // adminId is the owner's account: the only person who can grant or remove admin rights. admins holds player ids.
 export type Club = {adminId:string;admins:string[];teams:Record<Team,TeamInfo>;players:Player[];days:Day[];log?:LogEntry[]};
 export type PublicClub = {invitation?:{name:string;team:Team};players:Player[];days:Day[];revision:number;initialized:boolean;isAdmin:boolean;isOwner:boolean;owner:string|null;admins:string[];teams:Record<Team,TeamInfo>;me:string|null;log?:LogEntry[];polls:Record<string,{count:number;voted:boolean;tally:{candidate:string;votes:number}[]}>};

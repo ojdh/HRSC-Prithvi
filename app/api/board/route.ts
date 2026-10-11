@@ -3,7 +3,7 @@ import { BOARD_LIMITS, BOARD_REACTIONS, type BoardReaction } from '@/lib/club';
 import { ClubError, check, db } from '@/lib/server-club';
 import { deleteObject, putObject } from '@/lib/r2-budget';
 import { readImage, type UploadedImage } from '@/lib/server-images';
-import { readForm } from '@/lib/server-forms';
+import { readForm, readText } from '@/lib/server-forms';
 import { PHOTO_LIMIT_BYTES } from '@/lib/photo-compression';
 import { boardPage, boardViewer, findComment, findPost, logRemoval, openTeam, reactionTeam } from '@/lib/server-board';
 export const dynamic = 'force-dynamic';
@@ -39,7 +39,7 @@ export async function POST(req: Request) {
     };
     if (action === 'createPost') {
       const team = openTeam(viewer, form.get('team'));
-      const body = text(form.get('body'), BOARD_LIMITS.post), images = await photos(form, BOARD_LIMITS.postImages);
+      const body = readText(form.get('body'), BOARD_LIMITS.post), images = await photos(form, BOARD_LIMITS.postImages);
       const id = crypto.randomUUID(), now = Date.now(), keys = await store(images);
       await db().batch([
         db().prepare('INSERT INTO board_posts(id,team,author,body,created_at) VALUES(?,?,?,?,?)').bind(id, team, me.id, body, now),
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
     if (action === 'comment') {
       const post = await findPost(form.get('postId'));
       openTeam(viewer, post.team);
-      const body = text(form.get('body'), BOARD_LIMITS.comment), images = await photos(form, BOARD_LIMITS.commentImages);
+      const body = readText(form.get('body'), BOARD_LIMITS.comment), images = await photos(form, BOARD_LIMITS.commentImages);
       const full = await db().prepare('SELECT COUNT(*) AS n FROM board_comments WHERE post_id=?').bind(post.id).first<number>('n');
       check((full ?? 0) < BOARD_LIMITS.comments, `This post has reached ${BOARD_LIMITS.comments} comments.`);
       const id = crypto.randomUUID(), now = Date.now(), keys = await store(images);
@@ -104,14 +104,6 @@ export async function POST(req: Request) {
     for (const key of stored) await deleteObject(key);
     return failure(e);
   }
-}
-
-// Multipart form encoding sends line breaks as CRLF; they are stored as LF.
-function text(value: FormDataEntryValue | null, max: number) {
-  const trimmed = typeof value === 'string' ? value.replace(/\r\n?/g, '\n').trim() : '';
-  check(trimmed, 'Write something first.');
-  check(trimmed.length <= max, `Keep it to ${max} characters or fewer.`);
-  return trimmed;
 }
 
 async function photos(form: FormData, max: number) {

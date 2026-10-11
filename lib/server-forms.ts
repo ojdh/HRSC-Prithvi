@@ -20,6 +20,15 @@ export async function readJson(req: Request, maxBytes: number, tooLarge: string)
   return parsed as Record<string, unknown>;
 }
 
+// Message text: trimmed, non-empty and at most max characters. Line breaks are stored as LF,
+// since multipart form encoding sends them as CRLF.
+export function readText(value: unknown, max: number) {
+  const trimmed = typeof value === 'string' ? value.replace(/\r\n?/g, '\n').trim() : '';
+  check(trimmed, 'Write something first.');
+  check(trimmed.length <= max, `Keep it to ${max} characters or fewer.`);
+  return trimmed;
+}
+
 // The limit is enforced while the body is read, so a request without a Content-Length
 // header (or one that understates it) is refused before it is buffered past the limit.
 async function readBody(req: Request, maxBytes: number, tooLarge: string): Promise<Uint8Array<ArrayBuffer>> {

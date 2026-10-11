@@ -85,6 +85,13 @@
       "when": 1791564184277,
       "tag": "0011_team_formations",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1791680305984,
+      "tag": "0012_team_chat",
+      "breakpoints": true
     }
   ]
 }

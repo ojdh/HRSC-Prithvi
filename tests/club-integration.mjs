@@ -345,7 +345,7 @@ try{
   // URL routing: every address parses to one page state and builds back to the same address.
   const routes=(await libModule('lib/routes.ts',{'./club':club.url})).module;
   const parsed=search=>JSON.stringify(routes.parseRoute(search));
-  for(const route of [{view:'overview'},{view:'matchdays',day:'d1'},{view:'matchdays',day:'d1',tab:'vote'},{view:'matchdays',tab:'live'},{view:'matchdays',day:'d1',tab:'results'},{view:'profile',tab:'admin'},{view:'profile',tab:'guide'},{view:'teams'},{view:'teams',team:'red'},{view:'teams',tab:'board',team:'black'},{view:'teams',tab:'stats',team:'red'},{view:'teams',tab:'formation',team:'white'},{view:'standings',player:'p1'},{view:'teams',team:'white',player:'p2'},{view:'profile'}])
+  for(const route of [{view:'overview'},{view:'matchdays',day:'d1'},{view:'matchdays',day:'d1',tab:'vote'},{view:'matchdays',tab:'live'},{view:'matchdays',day:'d1',tab:'results'},{view:'profile',tab:'admin'},{view:'profile',tab:'guide'},{view:'teams'},{view:'teams',team:'red'},{view:'teams',tab:'board',team:'black'},{view:'teams',tab:'chat',team:'red'},{view:'teams',tab:'stats',team:'red'},{view:'teams',tab:'formation',team:'white'},{view:'standings',player:'p1'},{view:'teams',team:'white',player:'p2'},{view:'profile'}])
     ok(parsed(routes.routeSearch(route))===JSON.stringify(route),'route round trip '+JSON.stringify(route));
   ok(routes.routeSearch({view:'overview'})===''&&routes.routeSearch({view:'matchdays',day:'d 1',tab:'vote'})==='?view=matchdays&day=d+1&tab=vote','home has a bare address; values are encoded');
   ok(parsed('?view=vote&day=legacy')===JSON.stringify({view:'matchdays',day:'legacy',tab:'vote'})&&parsed('?view=vote')===JSON.stringify({view:'matchdays',tab:'vote'}),'shared vote links open that day\'s vote');
@@ -835,6 +835,93 @@ try{
     ok((await boardTight.dispatchFetch(origin+'/api/board/image?key='+encodeURIComponent(key),{headers:await headers('tight-black')})).status===403&&await used('class_b')===0,'a refused board photo view costs no R2 operation');
     ok((await boardTight.dispatchFetch(origin+'/api/board/image?key='+encodeURIComponent(key),{headers:await headers('owner')})).status===200,'the one budgeted board photo view still fits');
   }finally{await boardTight.dispose()}
+  // Team chat: each team's private, text-only conversation, open only to that team's players. It never touches R2.
+  const chats=new Miniflare({...workerOptions,bindings:{...accessBindings,...budget({storage:1e9,classA:1e6,classB:1e7})}});
+  try{
+    const ownerId=await setUp(chats);
+    const redId=await linkMember(chats,'Chat red','red','chat-red');
+    await linkMember(chats,'Chat red two','red','chat-red2');
+    await linkMember(chats,'Chat black','black','chat-black');
+    await clubCall(chats,'archivePlayer',{playerId:await linkMember(chats,'Chat gone','white','chat-gone')});
+    const readChat=async(user,team,query={})=>{const r=await chats.dispatchFetch(origin+'/api/chat?'+new URLSearchParams({team,...query}),{headers:user?await headers(user):{}});return {status:r.status,data:r.status===200?await r.json():null}};
+    const chatSend=async(user,body,extra={})=>{const r=await chats.dispatchFetch(origin+'/api/chat',{method:'POST',headers:{...await headers(user),...extra},body:JSON.stringify(body)});return {status:r.status,data:await r.json()}};
+    const say=(user,team,text)=>chatSend(user,{action:'send',team,body:text});
+    const chatDb=await chats.getD1Database('DB');
+    const messageCount=async()=>(await chatDb.prepare('SELECT COUNT(*) AS n FROM chat_messages').first('n'));
+    const r2Used=async()=>(await chatDb.prepare('SELECT coalesce(sum(class_a)+sum(class_b),0) AS n FROM r2_usage').first('n'));
+    // Sending and reading
+    const sent=await say('chat-red','red','Pitch is booked.\r\nBring water.');
+    ok(sent.status===200,'player sends a message to their own team chat: '+JSON.stringify(sent.data));
+    const redChat=await readChat('chat-red2','red'),first=redChat.data?.messages[0];
+    ok(redChat.status===200&&redChat.data.messages.length===1&&first.body==='Pitch is booked.\nBring water.'&&first.author===redId&&typeof first.createdAt==='number','teammates read the message, with line breaks stored as LF');
+    ok((await readChat('chat-red','black')).status===403,'another team’s chat is private');
+    ok((await say('chat-red','black','Hello rivals')).status===403,'players cannot write in another team’s chat');
+    ok((await readChat('owner','red')).status===200&&(await Promise.all(['black','white'].map(t=>readChat('owner',t)))).every(r=>r.status===403),'an admin reads only their own team’s chat');
+    ok((await say('owner','black','From the owner')).status===403,'an admin cannot write in another team’s chat');
+    ok((await readChat(null,'red')).status===401,'chat needs sign-in');
+    ok((await readChat('chat-gone','white')).status===403,'archived players lose their chat');
+    ok((await readChat('intruder','red')).status===403,'non-members cannot read the chat');
+    ok((await readChat('owner','purple')).status===400,'unknown chat rejected');
+    // Validation: refused messages store nothing
+    const countBefore=await messageCount();
+    ok((await say('chat-red','red','')).status===400&&(await say('chat-red','red','  \n ')).status===400,'a message needs text');
+    ok((await say('chat-red','red','x'.repeat(1001))).status===400,'messages are capped at 1000 characters');
+    ok((await chatSend('chat-red',{action:'send',team:'red',body:'Forged'},{Origin:'https://evil.test'})).status===403,'cross-site sends are refused');
+    ok((await send(chats,'/api/chat','chat-red',{action:'send',team:'red',body:'With a photo',images:photoFile()})).status===415,'chat takes text only, not photo uploads');
+    ok(await messageCount()===countBefore,'refused messages store nothing');
+    ok((await say('chat-red','red','x'.repeat(1000))).status===200,'a 1000-character message fits');
+    // Polling: an unchanged chat sends no messages back, and the server sets the pace
+    const latest=(await readChat('chat-red','red')).data;
+    const unchanged=await readChat('chat-red','red',{version:String(latest.version)});
+    ok(unchanged.status===200&&unchanged.data.unchanged===true&&!('messages' in unchanged.data)&&unchanged.data.version===latest.version,'a poll at the current version returns no messages');
+    ok(latest.refreshIn===3,'the chat refreshes every 3 seconds right after a message');
+    await say('chat-red2','red','On my way');
+    const changed=(await readChat('chat-red','red',{version:String(latest.version)})).data;
+    ok(!changed.unchanged&&changed.version>latest.version&&changed.messages[0].body==='On my way','a new message changes the version and arrives on the next poll');
+    await chatDb.prepare('UPDATE chat_state SET last_message_at=? WHERE team=?').bind(Date.now()-5*60_000,'red').run();
+    ok((await readChat('chat-red','red')).data.refreshIn===10,'a chat quiet for five minutes refreshes every 10 seconds');
+    await chatDb.prepare('UPDATE chat_state SET last_message_at=? WHERE team=?').bind(Date.now()-60*60_000,'red').run();
+    ok((await readChat('chat-red','red')).data.refreshIn===30,'a chat quiet for an hour refreshes every 30 seconds');
+    const empty=await readChat('chat-black','black');
+    ok(empty.status===200&&empty.data.messages.length===0&&empty.data.version===0&&empty.data.refreshIn===30,'a chat with no messages yet is quiet');
+    ok((await readChat('chat-red','red',{version:'abc'})).status===400,'a malformed version is rejected');
+    // Deleting: the author or an admin of that team
+    const target=changed.messages[0];
+    ok((await chatSend('chat-red',{action:'delete',messageId:target.id})).status===403,'a teammate cannot delete someone else’s message');
+    ok((await chatSend('chat-red2',{action:'delete',messageId:target.id})).status===200,'the author deletes their own message');
+    const afterDelete=(await readChat('chat-red','red',{version:String(changed.version)})).data;
+    ok(!afterDelete.unchanged&&!afterDelete.messages.some(m=>m.id===target.id),'the deletion reaches other viewers on their next poll');
+    ok((await chatSend('chat-red2',{action:'delete',messageId:target.id})).status===404,'a removed message cannot be deleted again');
+    const adminLog=async()=>(await (await chats.dispatchFetch(origin+'/api/club',{headers:await headers('owner')})).json()).log??[];
+    ok((await adminLog()).length===0,'an author deleting their own message is not logged');
+    await say('chat-red','red','Secret team talk');
+    const victim=(await readChat('owner','red')).data.messages[0];
+    ok((await chatSend('owner',{action:'delete',messageId:victim.id})).status===200,'an admin removes another player’s message');
+    const log=await adminLog();
+    ok(log.length===1&&log[0].action==='removeMessage'&&log[0].by===ownerId&&log[0].team==='red'&&log[0].author===redId,'the removal is logged with who, which team and the author');
+    ok(!JSON.stringify(log).includes('Secret team talk'),'the log never records the message text');
+    await say('chat-black','black','Black only');
+    const blackMessage=(await readChat('chat-black','black')).data.messages[0];
+    ok((await chatSend('owner',{action:'delete',messageId:blackMessage.id})).status===403,'an admin cannot remove messages from another team’s chat');
+    ok((await chatSend('chat-red',{action:'shout'})).status===400,'unknown chat actions are rejected');
+    // Paging: newest first, fifty at a time
+    for(let i=0;i<51;i++)await say('chat-black','black','Message '+i);
+    const page1=(await readChat('chat-black','black')).data,page2=(await readChat('chat-black','black',{before:page1.next})).data;
+    const paged=[...page1.messages,...page2.messages];
+    ok(page1.messages.length===50&&page2.messages.length===2&&page2.next===null&&new Set(paged.map(m=>m.id)).size===52&&paged.every((m,i)=>!i||paged[i-1].createdAt>=m.createdAt),'the chat pages fifty messages at a time, newest first');
+    ok((await readChat('chat-black','black',{before:'nonsense'})).status===400,'a malformed cursor is rejected');
+    // Retention: the daily cron removes messages older than 90 days and tells viewers
+    const day=86_400_000;
+    await chatDb.prepare('UPDATE chat_messages SET created_at=? WHERE body LIKE ?').bind(Date.now()-91*day,'Pitch is booked.%').run();
+    await chatDb.prepare('UPDATE chat_messages SET created_at=? WHERE body=?').bind(Date.now()-89*day,'Message 0').run();
+    const versionBeforeCron=(await readChat('chat-red','red')).data.version;
+    const run=await (await chats.getWorker()).scheduled({cron:'17 9 * * *'});
+    assert.equal(run.outcome,'ok');
+    const kept=(await readChat('chat-red','red')).data;
+    ok(!kept.messages.some(m=>m.body.startsWith('Pitch is booked'))&&kept.version>versionBeforeCron,'messages older than 90 days are deleted and the version moves');
+    ok(!!(await chatDb.prepare('SELECT 1 AS found FROM chat_messages WHERE body=?').bind('Message 0').first()),'messages younger than 90 days are kept');
+    ok(await r2Used()===0&&await storedObjects(chats)===0,'chat never touches R2');
+  }finally{await chats.dispose()}
   // Team formations: private to the team's own players, admins included only for their own team; the last save wins.
   const formations=new Miniflare({...workerOptions,bindings:{...accessBindings,...budget({storage:1e9,classA:1e6,classB:1e7})}});
   try{
