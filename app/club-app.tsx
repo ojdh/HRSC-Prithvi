@@ -17,7 +17,7 @@ import { compressPhoto,cropPhoto,type CropArea } from '@/lib/photo-compression';
 import { parseRoute,routeSearch,normalizeRoute,type Route,type View } from '@/lib/routes';
 import { FORMATION_LIMITS,LONG_PRESS,PITCH,PITCH_MARKINGS,RUN_KINDS,addSlot,aimStart,canAdd,clearRuns,hasRuns,initials,nudge,pointerSpot,pressIntent,removeSlot,runArrow,setRun,shareFileName,unplaced,type Formation,type FormationSlot,type PitchPoint,type RunKind } from '@/lib/formation';
 import { formationImage } from './formation-image';
-import { TEAMS,DEFAULT_TEAMS,teamStyle,emptyClub,teamStats,playerStats,nextMatch,dateLabel,timeLabel,isReady,currentDay,clubToday,ageFrom,isBirthMonth,embedVideo,weeklyDates,validDate,teamsWithout,MAX_SERIES_DAYS,freshDraft,draftKey,gameClock,roundPayload,keeperStats,carriedKeepers,type Keepers,isPlayed,DELETION_APPROVALS,awardWinners,pastMatchdays,homeAction,dayWinners,tablePosition,matchdaySections,defaultSection,dateStrip,type MatchdaySection,BOARD_LIMITS,BOARD_REACTIONS,type BoardPage,type BoardPost,type BoardReaction,type BoardReactions,CHAT_LIMITS,type ChatMessage,type ChatPage,type GameDraft,type LogEntry,type LogAction,type RoundSnapshot,type Team,type TeamInfo,type Player,type Round,type ReadyDay,type Goal as GoalEntry,type PublicClub,type Day } from '@/lib/club';
+import { TEAMS,DEFAULT_TEAMS,teamStyle,emptyClub,teamStats,playerStats,nextMatch,dateLabel,timeLabel,isReady,currentDay,clubToday,ageFrom,isBirthMonth,embedVideo,weeklyDates,validDate,teamsWithout,MAX_SERIES_DAYS,freshDraft,draftKey,gameClock,roundPayload,keeperStats,carriedKeepers,type Keepers,isPlayed,DELETION_APPROVALS,awardWinners,pastMatchdays,homeAction,dayWinners,tablePosition,matchdaySections,defaultSection,dateStrip,type MatchdaySection,BOARD_LIMITS,BOARD_REACTIONS,type BoardPage,type BoardPost,type BoardReaction,type BoardReactions,ADMIN_CHAT,CHAT_LIMITS,type ChatRoom,type ChatMessage,type ChatPage,type GameDraft,type LogEntry,type LogAction,type RoundSnapshot,type Team,type TeamInfo,type Player,type Round,type ReadyDay,type Goal as GoalEntry,type PublicClub,type Day } from '@/lib/club';
 
 // The league table's columns as [heading, full name]; short headings keep the table within a phone's width.
 const STANDINGS_COLUMNS=[['#',''],['Team',''],['P','Played'],['Pts','Points'],['W','Wins'],['D','Draws'],['L','Losses'],['GF','Goals for'],['GA','Goals against'],['GD','Goal difference'],['Form','Last five games'],['','']] as const;
@@ -124,7 +124,7 @@ export default function ClubApp({identity,signInUrl}:{identity:{name:string}|nul
     {loading&&<div className="banner" role="status"><span className="flex gap-2 items-center"><Loader2 className="animate-spin" size={16}/>Loading your club…</span></div>}
     {view==='overview'&&<div className="rise"><div className="page-heading"><div><div className="eyebrow">WINTER LEAGUE</div><h1>Prithvi FC</h1><p className="page-intro">Your next matchday, the last result, and your team’s board and chat.</p></div></div>
       <NextUp day={currentDay(data.days,today)} today={today} onOpen={(d,tab)=>go({view:'matchdays',day:d.id,tab})}/>
-      <div className="two-columns mt-5"><LastMatchday data={data} day={pastMatchdays(data.days,today)[0]} onOpen={d=>go({view:'matchdays',day:d.id,tab:'results'})}/>{member&&me&&<BoardPreview data={data} team={me.team} onOpen={()=>go({view:'teams',team:me.team,tab:'board'})}/>}{member&&me&&<ChatPreview data={data} team={me.team} onOpen={()=>go({view:'teams',team:me.team,tab:'chat'})}/>}</div></div>}
+      <div className="two-columns mt-5"><LastMatchday data={data} day={pastMatchdays(data.days,today)[0]} onOpen={d=>go({view:'matchdays',day:d.id,tab:'results'})}/>{member&&me&&<BoardPreview data={data} team={me.team} onOpen={()=>go({view:'teams',team:me.team,tab:'board'})}/>}{member&&me&&<ChatPreview data={data} room={me.team} onOpen={()=>go({view:'teams',team:me.team,tab:'chat'})}/>}{member&&me&&data.isAdmin&&<ChatPreview data={data} room={ADMIN_CHAT} onOpen={()=>go({view:'profile',tab:'admin'})}/>}</div></div>}
     {view==='standings'&&<div className="rise"><div className="page-heading"><div><div className="eyebrow">WINTER LEAGUE / 02</div><h1>Team standings</h1><p className="page-intro">Follow the race across the season or a single matchday.</p></div><Scope/></div><div className="section-title"><h2>The league table</h2></div><Standings/><div className="two-columns"><div className="panel"><div className="panel-head"><h2>Golden boot</h2><Goal size={20}/></div><Leaders players={players}/></div><div className="panel"><div className="panel-head"><h2>The playmakers</h2><Target size={20}/></div><Leaders players={players} kind="assists"/></div><div className="panel"><div className="panel-head"><h2>Most matchdays</h2><CalendarDays size={20}/></div><Leaders players={players} kind="attended"/></div><div className="panel"><div className="panel-head"><h2>Goalkeepers</h2><ShieldCheck size={20}/></div><KeeperLeaders keepers={keepers}/></div></div></div>}
     {view==='teams'&&!team&&<div className="rise"><div className="page-heading"><div><div className="eyebrow">WINTER LEAGUE / TEAMS</div><h1>The three sides</h1><p className="page-intro">{'The players behind '+TEAMS.map(t=>teamInfo[t].name).join(', ')+'.'}</p></div></div><TeamsGrid/></div>}
     {view==='teams'&&team&&<TeamPage key={team} data={data} team={team} requested={route.tab} players={players} table={teams} season={teamStats(data.days)} scope={<Scope/>} member={member} busy={busy} action={action} confirm={setConfirm}
@@ -326,7 +326,7 @@ function TeamPage({data,team,requested,players,table,season,scope,member,busy,ac
       <div className="metric-strip">{[[stats.played,'PLAYED'],[stats.points,'POINTS'],[stats.wins+'–'+stats.draws+'–'+stats.losses,'W–D–L'],[stats.gf,'GOALS FOR'],[stats.ga,'GOALS AGAINST'],[(stats.gd>0?'+':'')+stats.gd,'GOAL DIFFERENCE']].map(([v,l])=><div className="metric" key={l}><div><span className="metric-label">{l}</span><strong>{v}</strong></div></div>)}</div>
       <div className="two-columns"><div className="panel"><div className="panel-head"><h2>Top scorers</h2><Goal size={20}/></div><Leaders players={squad}/></div><div className="panel"><div className="panel-head"><h2>Playmakers</h2><Target size={20}/></div><Leaders players={squad} kind="assists"/></div><div className="panel"><div className="panel-head"><h2>Most matchdays</h2><CalendarDays size={20}/></div><Leaders players={squad} kind="attended"/></div></div></>}
     {section==='board'&&<TeamBoard data={data} team={team} confirm={confirm}/>}
-    {section==='chat'&&<TeamChat data={data} team={team} confirm={confirm}/>}
+    {section==='chat'&&<ChatPanel data={data} room={team} confirm={confirm}/>}
     {section==='formation'&&<TeamFormation data={data} team={team} confirm={confirm}/>}
   </div>
 }
@@ -374,18 +374,19 @@ function BoardPreview({data,team,onOpen}:{data:PublicClub;team:Team;onOpen:()=>v
     <button className="text-btn mt-3" onClick={onOpen}>Open the board<ArrowRight size={14}/></button></div>
 }
 const CHAT_PREVIEW_MESSAGES=3;
-// Home's fourth card: the latest messages in the visitor's team chat, kept current like the full chat, with a box to reply.
-function ChatPreview({data,team,onOpen}:{data:PublicClub;team:Team;onOpen:()=>void}){
-  const teamInfo=useContext(TeamsCtx),chat=useTeamChat(team),recent=chat.messages?.slice(0,CHAT_PREVIEW_MESSAGES).reverse();
-  return <div className="panel"><div className="panel-head"><h2>{teamInfo[team].name} chat</h2><MessageCircle size={20}/></div>
-    {recent===undefined?(!chat.failed&&<p className="help">Loading the chat…</p>):!recent.length?<p className="help">No messages yet. Say hello to your team.</p>
-      :<div className="chat-log is-preview" role="log" aria-label={teamInfo[team].name+' chat, latest messages'}>{recent.map(m=><ChatBubble key={m.id} message={m} data={data}/>)}</div>}
+// Home's chat cards: the latest messages in the visitor's team chat, and for admins the admin chat, kept current
+// like the full chat, with a box to reply.
+function ChatPreview({data,room,onOpen}:{data:PublicClub;room:ChatRoom;onOpen:()=>void}){
+  const copy=useChatCopy(room),chat=useChat(room),recent=chat.messages?.slice(0,CHAT_PREVIEW_MESSAGES).reverse();
+  return <div className="panel"><div className="panel-head"><h2>{copy.name}</h2>{room===ADMIN_CHAT?<Shield size={20}/>:<MessageCircle size={20}/>}</div>
+    {recent===undefined?(!chat.failed&&<p className="help">Loading the chat…</p>):!recent.length?<p className="help">No messages yet. Say hello to {copy.to}.</p>
+      :<div className="chat-log is-preview" role="log" aria-label={copy.name+', latest messages'}>{recent.map(m=><ChatBubble key={m.id} message={m} data={data}/>)}</div>}
     {chat.failed&&<p className="help">{chat.failed}</p>}
-    <ChatComposer key={team} onSend={chat.send} onTyping={chat.typing}/>
+    <ChatComposer key={room} to={copy.to} onSend={chat.send} onTyping={chat.typing}/>
     <button className="text-btn mt-3" onClick={onOpen}>Open the chat<ArrowRight size={14}/></button></div>
 }
 type MeSection='profile'|'guide'|'admin';
-const ME_SECTIONS:Record<MeSection,[string,typeof Users,string,string]>={profile:['Profile',UserRound,'My player profile','Your season so far, with the moments worth replaying.'],guide:['Club guide',Info,'How matchdays work.','The rules of the Winter league and how the app runs a matchday.'],admin:['Club admin',Settings2,'Club admin','Admins, new matchdays, exports, undoing rounds and the full edit log. Only admins see this.']};
+const ME_SECTIONS:Record<MeSection,[string,typeof Users,string,string]>={profile:['Profile',UserRound,'My player profile','Your season so far, with the moments worth replaying.'],guide:['Club guide',Info,'How matchdays work.','The rules of the Winter league and how the app runs a matchday.'],admin:['Club admin',Settings2,'Club admin','Admins, the admin chat, new matchdays, exports, undoing rounds and the full edit log. Only admins see this.']};
 function ClubGuide(){return <><div className="rules-grid">{[['01','The winter ritual','Organisers schedule matchdays, usually as a weekly series. Two teams play; the third waits.'],['02','Win and stay','Each game lasts 10 minutes, whatever the score. The winner stays and the waiting team comes in. In the table a win is worth 3 points, a draw 1.'],['03','Keep things moving','On a draw, the team that has been on longest leaves. For a draw in the first game, the organiser picks who leaves when setting up the day.']].map(([n,t,p])=><div className="rule" key={n}><b>{n}</b><h3>{t}</h3><p>{p}</p></div>)}</div><div className="two-columns mt-6"><div className="panel"><h2 className="text-xl font-bold mb-3">The matchday routine</h2><ol className="space-y-4 pl-5 list-decimal text-sm text-muted-foreground"><li>Set up the squads and send each player their personal invitation once.</li><li>After the game, create that matchday and confirm attendance.</li><li>Open voting and share the voting link in the team chat. No scores are needed.</li><li>At home, enter each round’s score, goals, assists and players who took part.</li><li>Close voting when you’re ready. The club can then see the winning player or joint winners.</li></ol></div><div className="panel"><h2 className="text-xl font-bold mb-3">Fair votes. Real stats.</h2><p className="help">One vote per attending player. You cannot vote for your team, and you cannot change your team yourself. A vote cannot be changed after submission.</p><p className="help mt-4">Votes are anonymous to club members: the ballot is stored separately from the record that says you voted. Only combined totals are shown, after voting closes. Small groups may still be able to infer a choice.</p><p className="help mt-4">Team wins count match results. Individual wins count only selected round participants. Own goals count for the team score, not a player’s goal tally. No result is invented.</p></div></div><div className="panel mt-6"><h2 className="text-xl font-bold mb-3">Getting everyone in</h2><p className="help">Open your personal invite, sign in with your own email, then tap Connect my player profile. Send personal invitations privately; use the shared voting link after every game.</p></div></>}
 // Club-wide admin tools: the admin list, scheduling, export and the full edit log.
 function ClubAdmin({data,busy,action,confirm,onNewMatchday,onExport,onToggleAdmin}:{data:PublicClub;busy:boolean;action:Action;confirm:Confirm;onNewMatchday:()=>void;onExport:()=>void;onToggleAdmin:(p:Player)=>void}){
@@ -396,6 +397,7 @@ function ClubAdmin({data,busy,action,confirm,onNewMatchday,onExport,onToggleAdmi
       <p className="help mt-3">Only the owner adds or removes admins. Make someone an admin from their row under Manage on their team page.</p></section>
       <section className="panel"><div className="panel-head"><h2>Matchdays and data</h2><CalendarDays size={20}/></div><p className="subtle mb-4">Schedule one matchday or a weekly series. Attendance and opening teams are set on the day.</p>
         <div className="action-row"><button className="primary-btn" onClick={onNewMatchday}><Plus/>New matchday</button><button className="secondary-btn" onClick={onExport}><Download/>Export stats</button></div></section></div>
+    <section><div className="section-title"><h2>Admin chat</h2></div><ChatPanel data={data} room={ADMIN_CHAT} confirm={confirm}/></section>
     <UndoRound data={data} busy={busy} action={action} confirm={confirm}/>
     <section className="panel"><div className="panel-head"><h2>Edit log</h2><History size={22}/></div><p className="subtle">Every corrected or undone game, every matchday deletion and every board post or comment an admin removed, newest first.</p><EditLog entries={data.log??[]} players={data.players} showDay/></section>
   </div>
@@ -620,22 +622,22 @@ function BoardComposer({comment=false,home=false,onPost}:{comment?:boolean;home?
 const CHAT_TYPING_REFRESH_S=3,CHAT_TYPING_WINDOW_MS=10_000;
 const chatCursor=(m:ChatMessage)=>m.createdAt+':'+m.id;
 async function chatRequest(body:Record<string,unknown>){const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json() as {error?:string};if(!r.ok)throw new Error(j.error||'The team chat could not be updated. Please try again.');return j}
-// A team chat kept current by polling at the pace the server sets (refreshIn): at least every 3 seconds while
-// this person is typing, and not at all while the page is hidden. Used by the team page's Chat and Home's chat card.
-function useTeamChat(team:Team){
+// A chat kept current by polling at the pace the server sets (refreshIn): at least every 3 seconds while
+// this person is typing, and not at all while the page is hidden. Used by the chat panels and Home's chat cards.
+function useChat(room:ChatRoom){
   const [messages,setMessages]=useState<ChatMessage[]|null>(null),[next,setNext]=useState<string|null>(null),[failed,setFailed]=useState(''),[loadingOlder,setLoadingOlder]=useState(false);
-  // The chat on screen, so a response that arrives after a team switch or unmount is dropped.
-  const active=useRef<Team|null>(team),version=useRef<number|null>(null),typingUntil=useRef(0),timer=useRef<ReturnType<typeof setTimeout>>(undefined);
+  // The chat on screen, so a response that arrives after a chat switch or unmount is dropped.
+  const active=useRef<ChatRoom|null>(room),version=useRef<number|null>(null),typingUntil=useRef(0),timer=useRef<ReturnType<typeof setTimeout>>(undefined);
   // The oldest message loaded once older pages are open, so a changed chat returns all of them and drops any deleted or expired.
   const since=useRef<string|null>(null);
   const schedule=useCallback((seconds:number,poll:()=>void)=>{clearTimeout(timer.current);if(document.visibilityState==='visible')timer.current=setTimeout(poll,seconds*1000)},[]);
   const poll=useCallback(async function poll(){
-    const forTeam=team,asked=since.current;let wait=30;
+    const forRoom=room,asked=since.current;let wait=30;
     try{
-      const r=await fetch('/api/chat?team='+forTeam+(version.current===null?'':'&version='+version.current)+(asked===null?'':'&since='+encodeURIComponent(asked)),{cache:'no-store'});
+      const r=await fetch('/api/chat?team='+forRoom+(version.current===null?'':'&version='+version.current)+(asked===null?'':'&since='+encodeURIComponent(asked)),{cache:'no-store'});
       const j=await r.json() as ChatPage&{error?:string};
-      if(!r.ok)throw new Error(j.error||'The team chat could not load.');
-      if(active.current!==forTeam)return;
+      if(!r.ok)throw new Error(j.error||'The chat could not load.');
+      if(active.current!==forRoom)return;
       wait=j.refreshIn;setFailed('');
       // An answer for a window that older messages have since extended is dropped; the next poll asks again.
       if(!j.unchanged&&(version.current===null||j.version>version.current)&&since.current===asked){
@@ -643,42 +645,45 @@ function useTeamChat(team:Team){
         const oldest=j.messages.at(-1);if(asked!==null)since.current=oldest?chatCursor(oldest):null;
         setMessages(j.messages);setNext(j.next);
       }
-    }catch(e){if(active.current===forTeam)setFailed((e as Error).message)}
-    if(active.current===forTeam)schedule(Date.now()<typingUntil.current?Math.min(wait,CHAT_TYPING_REFRESH_S):wait,()=>void poll());
-  },[team,schedule]);
+    }catch(e){if(active.current===forRoom)setFailed((e as Error).message)}
+    if(active.current===forRoom)schedule(Date.now()<typingUntil.current?Math.min(wait,CHAT_TYPING_REFRESH_S):wait,()=>void poll());
+  },[room,schedule]);
   useEffect(()=>{
-    active.current=team;version.current=null;since.current=null;setMessages(null);setNext(null);setFailed('');void poll();
+    active.current=room;version.current=null;since.current=null;setMessages(null);setNext(null);setFailed('');void poll();
     const wake=()=>{if(document.visibilityState==='visible')void poll();else clearTimeout(timer.current)};
     document.addEventListener('visibilitychange',wake);
     return ()=>{active.current=null;clearTimeout(timer.current);document.removeEventListener('visibilitychange',wake)};
-  },[team,poll]);
+  },[room,poll]);
   const typing=useCallback(()=>{const idle=Date.now()>=typingUntil.current;typingUntil.current=Date.now()+CHAT_TYPING_WINDOW_MS;if(idle)schedule(CHAT_TYPING_REFRESH_S,()=>void poll())},[poll,schedule]);
   async function act(body:Record<string,unknown>,done?:string){try{await chatRequest(body);if(done)toast.success(done);await poll();return true}catch(e){toast.error((e as Error).message);return false}}
-  async function loadOlder(){if(!next)return;setLoadingOlder(true);try{const r=await fetch('/api/chat?team='+team+'&before='+encodeURIComponent(next),{cache:'no-store'});const j=await r.json() as ChatPage&{error?:string};if(!r.ok||j.unchanged)throw new Error(j.error||'Older messages could not load.');
+  async function loadOlder(){if(!next)return;setLoadingOlder(true);try{const r=await fetch('/api/chat?team='+room+'&before='+encodeURIComponent(next),{cache:'no-store'});const j=await r.json() as ChatPage&{error?:string};if(!r.ok||j.unchanged)throw new Error(j.error||'Older messages could not load.');
     const oldest=j.messages.at(-1);if(oldest)since.current=chatCursor(oldest);
     setMessages(current=>[...(current??[]),...j.messages.filter(m=>!current?.some(c=>c.id===m.id))]);setNext(j.next)}catch(e){toast.error((e as Error).message)}finally{setLoadingOlder(false)}}
   return {messages,next,failed,loadingOlder,loadOlder,typing,
-    send:(body:string)=>act({action:'send',team,body}),
+    send:(body:string)=>act({action:'send',team:room,body}),
     remove:(messageId:string)=>act({action:'delete',messageId},'Message deleted.')};
 }
-// A team's private, text-only chat, shown on its team page only to its own players; admins on the team can remove messages.
-function TeamChat({data,team,confirm}:{data:PublicClub;team:Team;confirm:Confirm}){
-  const teamInfo=useContext(TeamsCtx),chat=useTeamChat(team),log=useRef<HTMLDivElement>(null),atBottom=useRef(true);
+// What each chat is called and who it is for: a team's own players, or the admins and the owner.
+function useChatCopy(room:ChatRoom){const teamInfo=useContext(TeamsCtx);return room===ADMIN_CHAT?{name:'Admin chat',audience:'admins and the owner',to:'the admins'}:{name:teamInfo[room].name+' chat',audience:'your team',to:'your team'}}
+// A private, text-only chat: a team's, on its team page for its own players, where its admins can remove messages;
+// or the admin chat, in Club admin, where everyone removes only their own.
+function ChatPanel({data,room,confirm}:{data:PublicClub;room:ChatRoom;confirm:Confirm}){
+  const copy=useChatCopy(room),chat=useChat(room),log=useRef<HTMLDivElement>(null),atBottom=useRef(true);
   const ordered=chat.messages&&[...chat.messages].reverse();
   // Follows new messages while the reader is at the bottom, and leaves the view alone while they read back.
   useEffect(()=>{const el=log.current;if(el&&atBottom.current)el.scrollTop=el.scrollHeight},[chat.messages]);
   async function loadOlder(){const el=log.current,fromBottom=el?el.scrollHeight-el.scrollTop:0;await chat.loadOlder();requestAnimationFrame(()=>{if(el)el.scrollTop=el.scrollHeight-fromBottom})}
   function remove(m:ChatMessage){confirm({title:'Delete this message?',description:'It is removed for everyone. This cannot be undone.'+(m.author!==data.me?' The removal is recorded in the admin edit log, without the text.':''),action:()=>void chat.remove(m.id)})}
   return <div className="chat-panel panel">
-    <p className="help">Private: messages for your team only, kept for 90 days.</p>
-    <div className="chat-log" ref={log} role="log" aria-label={teamInfo[team].name+' chat'} onScroll={e=>{const el=e.currentTarget;atBottom.current=el.scrollHeight-el.scrollTop-el.clientHeight<40}}>
+    <p className="help">Private: messages for {copy.audience} only, kept for 90 days.</p>
+    <div className="chat-log" ref={log} role="log" aria-label={copy.name} onScroll={e=>{const el=e.currentTarget;atBottom.current=el.scrollHeight-el.scrollTop-el.clientHeight<40}}>
       {chat.next&&<button type="button" className="secondary-btn mx-auto flex" disabled={chat.loadingOlder} onClick={()=>void loadOlder()}>{chat.loadingOlder?'Loading…':'Load older messages'}</button>}
       {ordered===null?(!chat.failed&&<p className="help flex gap-2 items-center"><Loader2 className="animate-spin" size={16}/>Loading the chat…</p>)
-        :!ordered.length?<NoData title="No messages yet">Say hello to your team.</NoData>
-        :ordered.map(m=><ChatBubble key={m.id} message={m} data={data} onDelete={m.author===data.me||data.isAdmin?()=>remove(m):undefined}/>)}
+        :!ordered.length?<NoData title="No messages yet">Say hello to {copy.to}.</NoData>
+        :ordered.map(m=><ChatBubble key={m.id} message={m} data={data} onDelete={m.author===data.me||data.isAdmin&&room!==ADMIN_CHAT?()=>remove(m):undefined}/>)}
     </div>
     {chat.failed&&<p className="form-blocker" role="alert">{chat.failed}</p>}
-    <ChatComposer key={team} onSend={chat.send} onTyping={chat.typing}/>
+    <ChatComposer key={room} to={copy.to} onSend={chat.send} onTyping={chat.typing}/>
   </div>
 }
 function ChatBubble({message:m,data,onDelete}:{message:ChatMessage;data:PublicClub;onDelete?:()=>void}){
@@ -688,11 +693,11 @@ function ChatBubble({message:m,data,onDelete}:{message:ChatMessage;data:PublicCl
     <p className="board-text">{m.body}</p></div></div>
 }
 // Writes a chat message: Enter sends, Shift+Enter starts a new line.
-function ChatComposer({onSend,onTyping}:{onSend:(body:string)=>Promise<boolean>;onTyping:()=>void}){
+function ChatComposer({to,onSend,onTyping}:{to:string;onSend:(body:string)=>Promise<boolean>;onTyping:()=>void}){
   const [body,setBody]=useState(''),[busy,setBusy]=useState(false);
   async function submit(){if(busy||!body.trim())return;setBusy(true);if(await onSend(body))setBody('');setBusy(false)}
   return <form className="chat-composer" onSubmit={e=>{e.preventDefault();void submit()}}>
-    <textarea aria-label="Write a message to your team" value={body} maxLength={CHAT_LIMITS.message} rows={1} placeholder="Message your team…" onChange={e=>{setBody(e.target.value);onTyping()}} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void submit()}}}/>
+    <textarea aria-label={'Write a message to '+to} value={body} maxLength={CHAT_LIMITS.message} rows={1} placeholder={'Message '+to+'…'} onChange={e=>{setBody(e.target.value);onTyping()}} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void submit()}}}/>
     <button className="primary-btn" disabled={busy||!body.trim()} aria-label="Send message"><Send/></button>
   </form>
 }

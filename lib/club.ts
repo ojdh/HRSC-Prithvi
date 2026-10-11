@@ -41,8 +41,11 @@ export type BoardComment={id:string;author:string;body:string;createdAt:number;i
 export type BoardPost={id:string;team:Team;author:string;body:string;createdAt:number;images:string[];reactions:BoardReactions;comments:BoardComment[]};
 // next is the cursor for the following page, or null on the last page.
 export type BoardPage={posts:BoardPost[];next:string|null};
-// Team chats: each team's private, text-only conversation. version moves on every send and delete;
-// refreshIn is how many seconds the server asks the client to wait before its next poll.
+// Chats: each team's private, text-only conversation, plus one for the admins and the owner (ADMIN_CHAT).
+// version moves on every send and delete; refreshIn is how many seconds the server asks the client to wait
+// before its next poll.
+export const ADMIN_CHAT='admins';
+export type ChatRoom=Team|typeof ADMIN_CHAT;
 export const CHAT_LIMITS={message:1000,page:50,window:500} as const;
 export type ChatMessage={id:string;author:string;body:string;createdAt:number};
 export type ChatPage={version:number;refreshIn:number}&({unchanged:true}|{unchanged?:undefined;messages:ChatMessage[];next:string|null});
