@@ -369,8 +369,9 @@ try{
   ok(withGuest.length===2&&withGuest[1].label==='Guest striker'&&withGuest[1].playerId===null&&withGuest[1].x===formation.SPOTS[1][0],'a placeholder name is trimmed and takes the next free spot');
   ok(formation.addSlot(keeper,{playerId:'p1'},'s3')===keeper,'a player already on the pitch cannot be added twice');
   ok(formation.addSlot(keeper,{label:'   '},'s3')===keeper&&formation.addSlot(keeper,{label:'x'.repeat(31)},'s3')===keeper,'placeholder names must be 1 to 30 characters');
-  let full=[];for(let i=0;i<10;i++)full=formation.addSlot(full,{label:'P'+i},'f'+i);
-  ok(full.length===10&&!formation.canAdd(full)&&formation.addSlot(full,{label:'Eleventh'},'f10')===full,'a formation holds at most 10 players');
+  let full=[];for(let i=0;i<11;i++)full=formation.addSlot(full,{label:'P'+i},'f'+i);
+  ok(full.length===11&&!formation.canAdd(full)&&formation.addSlot(full,{label:'Twelfth'},'f11')===full,'a formation holds at most 11 players');
+  ok(new Set(full.map(s=>s.x+','+s.y)).size===11,'each of the eleven players starts on their own default spot');
   const gap=formation.removeSlot(withGuest,'s1');
   ok(gap.length===1&&gap[0].id==='s2'&&formation.addSlot(gap,{playerId:'p2'},'s4')[1].x===formation.SPOTS[0][0],'removing a player frees their default spot for the next one');
   ok(formation.unplaced([{id:'p1'},{id:'p2'}],keeper).map(p=>p.id).join()==='p2','the squad picker hides players already placed');
@@ -972,7 +973,7 @@ try{
     ok((await formationSend('form-red',{action:'save',id:crypto.randomUUID(),name:'Missing',slots:[]})).status===404,'saving a deleted formation is refused');
     // Validation: every refused save leaves the stored formation unchanged
     const refused=async(slots,why,name='Valid name')=>{const r=await formationSend('form-red',{action:'save',id:redPlan,name,slots});ok(r.status===400,why+': '+JSON.stringify(r))};
-    await refused(Array.from({length:11},(_,i)=>slot('s'+i,{label:'P'+i})),'a formation holds at most 10 players');
+    await refused(Array.from({length:12},(_,i)=>slot('s'+i,{label:'P'+i})),'a formation holds at most 11 players');
     for(const [x,y] of [[1.5,0.5],[0.5,-0.1],['0.5',0.5],[null,0.5],[0.5,undefined]])await refused([{id:'a',playerId:null,label:'Guest',x,y}],'positions must be numbers on the pitch: '+x+','+y);
     await refused([slot('a',{playerId:blackId})],'a player from another team');
     await refused([slot('a',{playerId:redId}),slot('b',{playerId:redId})],'the same player twice');
@@ -1009,6 +1010,10 @@ try{
     await (await formations.getD1Database('DB')).prepare('UPDATE formations SET slots=? WHERE id=?').bind(JSON.stringify([{id:'old',playerId:redId,label:null,x:0.5,y:0.9}]),redPlan).run();
     const legacy=await readFormations('form-red','red'),legacySlots=legacy.data.formations?.find(f=>f.id===redPlan)?.slots;
     ok(legacy.status===200&&legacySlots.length===1&&legacySlots[0].x===0.5&&legacySlots[0].attack===null&&legacySlots[0].defend===null,'a formation saved before arrows reads with none: '+JSON.stringify(legacySlots));
+    // The largest valid formation: eleven placeholders with the longest names and both arrows
+    const widest=Array.from({length:11},()=>({...slot(crypto.randomUUID(),{label:'漢'.repeat(30)}),x:0.123,y:0.456,attack:{x:0.111,y:0.222},defend:{x:0.333,y:0.444}}));
+    const savedWidest=await formationSend('form-red',{action:'save',id:redPlan,name:'漢'.repeat(40),slots:widest});
+    ok(savedWidest.status===200,'eleven players with the longest names and both arrows fit in one save: '+JSON.stringify(savedWidest));
   }finally{await formations.dispose()}
   // Data migrations upgrade a club saved before them.
   const oldClub=new Miniflare({...workerOptions,bindings:accessBindings});
