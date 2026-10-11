@@ -603,7 +603,7 @@ function BoardComposer({comment=false,onPost}:{comment?:boolean;onPost:(body:str
       <button className="primary-btn" disabled={busy||!body.trim()}>{busy?'Sending…':comment?'Comment':'Post'}<Send/></button></div>
   </form>
 }
-// Formation builder: a team's saved line-ups of up to ten players on a vertical pitch. Only its own players edit
+// Formation builder: a team's saved line-ups of up to eleven players on a vertical pitch. Only its own players edit
 // them and the last save wins. Changes stay on this device until Save.
 type FormationDraft={name:string;slots:FormationSlot[]};
 const draftOf=({name,slots}:Formation):FormationDraft=>({name,slots});
