@@ -910,16 +910,26 @@ try{
     const paged=[...page1.messages,...page2.messages];
     ok(page1.messages.length===50&&page2.messages.length===2&&page2.next===null&&new Set(paged.map(m=>m.id)).size===52&&paged.every((m,i)=>!i||paged[i-1].createdAt>=m.createdAt),'the chat pages fifty messages at a time, newest first');
     ok((await readChat('chat-black','black',{before:'nonsense'})).status===400,'a malformed cursor is rejected');
+    // Polling with older pages loaded: the client sends its oldest loaded message, and a changed chat returns that whole window
+    const oldestLoaded=paged.at(-1),since=oldestLoaded.createdAt+':'+oldestLoaded.id,removedOld=paged.at(-2);
+    ok((await readChat('chat-black','black',{version:String(page2.version),since})).data?.unchanged===true,'an unchanged chat with older pages loaded still sends no messages');
+    ok((await chatSend('chat-black',{action:'delete',messageId:removedOld.id})).status===200,'a message on an older page is deleted');
+    await say('chat-black','black','After the delete');
+    const window=(await readChat('chat-black','black',{version:String(page2.version),since})).data;
+    ok(window.messages.length===52&&!window.messages.some(m=>m.id===removedOld.id)&&window.messages[0].body==='After the delete'&&window.messages.at(-1).id===oldestLoaded.id&&window.next===null,'a changed chat returns every loaded message still there, so deletions on older pages disappear');
+    const partial=(await readChat('chat-black','black',{since:page1.next})).data;
+    ok(partial.messages.at(-1).createdAt+':'+partial.messages.at(-1).id===page1.next&&partial.next===page1.next,'the window says when older messages remain beneath it');
+    ok((await readChat('chat-black','black',{since:'nonsense'})).status===400&&(await readChat('chat-black','black',{since,before:since})).status===400,'a malformed or conflicting window is rejected');
     // Retention: the daily cron removes messages older than 90 days and tells viewers
     const day=86_400_000;
     await chatDb.prepare('UPDATE chat_messages SET created_at=? WHERE body LIKE ?').bind(Date.now()-91*day,'Pitch is booked.%').run();
-    await chatDb.prepare('UPDATE chat_messages SET created_at=? WHERE body=?').bind(Date.now()-89*day,'Message 0').run();
+    await chatDb.prepare('UPDATE chat_messages SET created_at=? WHERE body=?').bind(Date.now()-89*day,'Message 1').run();
     const versionBeforeCron=(await readChat('chat-red','red')).data.version;
     const run=await (await chats.getWorker()).scheduled({cron:'17 9 * * *'});
     assert.equal(run.outcome,'ok');
     const kept=(await readChat('chat-red','red')).data;
     ok(!kept.messages.some(m=>m.body.startsWith('Pitch is booked'))&&kept.version>versionBeforeCron,'messages older than 90 days are deleted and the version moves');
-    ok(!!(await chatDb.prepare('SELECT 1 AS found FROM chat_messages WHERE body=?').bind('Message 0').first()),'messages younger than 90 days are kept');
+    ok(!!(await chatDb.prepare('SELECT 1 AS found FROM chat_messages WHERE body=?').bind('Message 1').first()),'messages younger than 90 days are kept');
     ok(await r2Used()===0&&await storedObjects(chats)===0,'chat never touches R2');
   }finally{await chats.dispose()}
   // Team formations: private to the team's own players, admins included only for their own team; the last save wins.

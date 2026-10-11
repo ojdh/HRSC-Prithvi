@@ -13,7 +13,7 @@ export async function GET(req: Request) {
   try {
     const params = new URL(req.url).searchParams;
     const team = openChat(await boardViewer(await getUser()), params.get('team'));
-    return Response.json(await chatPage(team, params.get('version'), params.get('before')), { headers: { 'Cache-Control': 'private, no-store' } });
+    return Response.json(await chatPage(team, params.get('version'), params.get('before'), params.get('since')), { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (e) { return failure(e); }
 }
 

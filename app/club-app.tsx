@@ -618,34 +618,36 @@ function BoardComposer({comment=false,home=false,onPost}:{comment?:boolean;home?
   </form>
 }
 const CHAT_TYPING_REFRESH_S=3,CHAT_TYPING_WINDOW_MS=10_000;
+const chatCursor=(m:ChatMessage)=>m.createdAt+':'+m.id;
 async function chatRequest(body:Record<string,unknown>){const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json() as {error?:string};if(!r.ok)throw new Error(j.error||'The team chat could not be updated. Please try again.');return j}
 // A team chat kept current by polling at the pace the server sets (refreshIn): at least every 3 seconds while
 // this person is typing, and not at all while the page is hidden. Used by the team page's Chat and Home's chat card.
 function useTeamChat(team:Team){
   const [messages,setMessages]=useState<ChatMessage[]|null>(null),[next,setNext]=useState<string|null>(null),[failed,setFailed]=useState(''),[loadingOlder,setLoadingOlder]=useState(false);
   // The chat on screen, so a response that arrives after a team switch or unmount is dropped.
-  const active=useRef<Team|null>(team),version=useRef<number|null>(null),loaded=useRef(messages),typingUntil=useRef(0),timer=useRef<ReturnType<typeof setTimeout>>(undefined);
-  useEffect(()=>{loaded.current=messages});
+  const active=useRef<Team|null>(team),version=useRef<number|null>(null),typingUntil=useRef(0),timer=useRef<ReturnType<typeof setTimeout>>(undefined);
+  // The oldest message loaded once older pages are open, so a changed chat returns all of them and drops any deleted or expired.
+  const since=useRef<string|null>(null);
   const schedule=useCallback((seconds:number,poll:()=>void)=>{clearTimeout(timer.current);if(document.visibilityState==='visible')timer.current=setTimeout(poll,seconds*1000)},[]);
   const poll=useCallback(async function poll(){
-    const forTeam=team;let wait=30;
+    const forTeam=team,asked=since.current;let wait=30;
     try{
-      const r=await fetch('/api/chat?team='+forTeam+(version.current===null?'':'&version='+version.current),{cache:'no-store'});
+      const r=await fetch('/api/chat?team='+forTeam+(version.current===null?'':'&version='+version.current)+(asked===null?'':'&since='+encodeURIComponent(asked)),{cache:'no-store'});
       const j=await r.json() as ChatPage&{error?:string};
       if(!r.ok)throw new Error(j.error||'The team chat could not load.');
       if(active.current!==forTeam)return;
       wait=j.refreshIn;setFailed('');
-      if(!j.unchanged&&(version.current===null||j.version>version.current)){
+      // An answer for a window that older messages have since extended is dropped; the next poll asks again.
+      if(!j.unchanged&&(version.current===null||j.version>version.current)&&since.current===asked){
         version.current=j.version;
-        // Keeps older messages already loaded beneath the newest page.
-        const oldest=j.messages.at(-1),older=j.next&&oldest?(loaded.current??[]).filter(m=>m.createdAt<oldest.createdAt||m.createdAt===oldest.createdAt&&m.id<oldest.id):[];
-        setMessages([...j.messages,...older]);if(!older.length)setNext(j.next);
+        const oldest=j.messages.at(-1);if(asked!==null)since.current=oldest?chatCursor(oldest):null;
+        setMessages(j.messages);setNext(j.next);
       }
     }catch(e){if(active.current===forTeam)setFailed((e as Error).message)}
     if(active.current===forTeam)schedule(Date.now()<typingUntil.current?Math.min(wait,CHAT_TYPING_REFRESH_S):wait,()=>void poll());
   },[team,schedule]);
   useEffect(()=>{
-    active.current=team;version.current=null;setMessages(null);setNext(null);setFailed('');void poll();
+    active.current=team;version.current=null;since.current=null;setMessages(null);setNext(null);setFailed('');void poll();
     const wake=()=>{if(document.visibilityState==='visible')void poll();else clearTimeout(timer.current)};
     document.addEventListener('visibilitychange',wake);
     return ()=>{active.current=null;clearTimeout(timer.current);document.removeEventListener('visibilitychange',wake)};
@@ -653,6 +655,7 @@ function useTeamChat(team:Team){
   const typing=useCallback(()=>{const idle=Date.now()>=typingUntil.current;typingUntil.current=Date.now()+CHAT_TYPING_WINDOW_MS;if(idle)schedule(CHAT_TYPING_REFRESH_S,()=>void poll())},[poll,schedule]);
   async function act(body:Record<string,unknown>,done?:string){try{await chatRequest(body);if(done)toast.success(done);await poll();return true}catch(e){toast.error((e as Error).message);return false}}
   async function loadOlder(){if(!next)return;setLoadingOlder(true);try{const r=await fetch('/api/chat?team='+team+'&before='+encodeURIComponent(next),{cache:'no-store'});const j=await r.json() as ChatPage&{error?:string};if(!r.ok||j.unchanged)throw new Error(j.error||'Older messages could not load.');
+    const oldest=j.messages.at(-1);if(oldest)since.current=chatCursor(oldest);
     setMessages(current=>[...(current??[]),...j.messages.filter(m=>!current?.some(c=>c.id===m.id))]);setNext(j.next)}catch(e){toast.error((e as Error).message)}finally{setLoadingOlder(false)}}
   return {messages,next,failed,loadingOlder,loadOlder,typing,
     send:(body:string)=>act({action:'send',team,body}),

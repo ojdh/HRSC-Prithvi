@@ -43,7 +43,7 @@ export type BoardPost={id:string;team:Team;author:string;body:string;createdAt:n
 export type BoardPage={posts:BoardPost[];next:string|null};
 // Team chats: each team's private, text-only conversation. version moves on every send and delete;
 // refreshIn is how many seconds the server asks the client to wait before its next poll.
-export const CHAT_LIMITS={message:1000,page:50} as const;
+export const CHAT_LIMITS={message:1000,page:50,window:500} as const;
 export type ChatMessage={id:string;author:string;body:string;createdAt:number};
 export type ChatPage={version:number;refreshIn:number}&({unchanged:true}|{unchanged?:undefined;messages:ChatMessage[];next:string|null});
 // adminId is the owner's account: the only person who can grant or remove admin rights. admins holds player ids.

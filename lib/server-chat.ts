@@ -17,23 +17,37 @@ export function refreshIn(lastMessageAt: number | null) {
 }
 
 // Newest first. A poll that sends the version it already has gets only the version and pace back,
-// so an idle chat costs one row read. The cursor is the last message's created_at and id, as on the board.
-export async function chatPage(team: Team, known: string | null, before: string | null): Promise<ChatPage> {
+// so an idle chat costs one row read. Cursors are a message's created_at and id, as on the board:
+// `before` pages to older messages; `since` is the oldest message a client has loaded, and a changed chat
+// then returns every message from the newest down to it (up to CHAT_LIMITS.window), so messages deleted
+// or expired anywhere in what the client shows drop out.
+export async function chatPage(team: Team, known: string | null, before: string | null, since: string | null): Promise<ChatPage> {
   check(known === null || /^\d{1,15}$/.test(known), 'Refresh the chat to catch up.');
-  const cursor = before === null ? null : /^(\d{1,15}):([a-f0-9-]{36})$/.exec(before);
-  check(before === null || cursor, 'Refresh the chat to load older messages.');
+  const older = readCursor(before), from = readCursor(since);
+  check(!(older && from), 'Refresh the chat to load older messages.');
   const state = await db().prepare('SELECT version,last_message_at FROM chat_state WHERE team=?').bind(team).first<{ version: number; last_message_at: number | null }>();
   const version = state?.version ?? 0, pace = refreshIn(state?.last_message_at ?? null);
-  if (!cursor && known !== null && Number(known) === version) return { version, refreshIn: pace, unchanged: true };
-  const size = CHAT_LIMITS.page;
-  const { results } = await db().prepare('SELECT id,author,body,created_at FROM chat_messages WHERE team=?1 AND (?2 IS NULL OR created_at<?2 OR (created_at=?2 AND id<?3)) ORDER BY created_at DESC,id DESC LIMIT ?4')
-    .bind(team, cursor ? Number(cursor[1]) : null, cursor?.[2] ?? null, size + 1).all<MessageRow>();
-  const shown = results.slice(0, size), last = shown.at(-1);
+  if (!older && known !== null && Number(known) === version) return { version, refreshIn: pace, unchanged: true };
+  const size = from ? CHAT_LIMITS.window : CHAT_LIMITS.page;
+  const page = db().prepare('SELECT id,author,body,created_at FROM chat_messages WHERE team=?1 AND (?2 IS NULL OR created_at<?2 OR (created_at=?2 AND id<?3)) AND (?4 IS NULL OR created_at>?4 OR (created_at=?4 AND id>=?5)) ORDER BY created_at DESC,id DESC LIMIT ?6')
+    .bind(team, older?.createdAt ?? null, older?.id ?? null, from?.createdAt ?? null, from?.id ?? null, size + 1);
+  // A window also asks whether anything is older than it, which costs at most one more row.
+  const beneath = from && db().prepare('SELECT 1 FROM chat_messages WHERE team=?1 AND (created_at<?2 OR (created_at=?2 AND id<?3)) LIMIT 1').bind(team, from.createdAt, from.id);
+  const [{ results }, probe] = await db().batch(beneath ? [page, beneath] : [page]);
+  const rows = results as MessageRow[], shown = rows.slice(0, size), last = shown.at(-1);
+  const more = rows.length > size || !!probe?.results.length;
   return {
     version, refreshIn: pace,
     messages: shown.map(m => ({ id: m.id, author: m.author, body: m.body, createdAt: m.created_at })),
-    next: results.length > size && last ? `${last.created_at}:${last.id}` : null,
+    next: !more ? null : last ? `${last.created_at}:${last.id}` : since,
   };
+}
+
+function readCursor(cursor: string | null) {
+  if (cursor === null) return null;
+  const parts = /^(\d{1,15}):([a-f0-9-]{36})$/.exec(cursor);
+  check(parts, 'Refresh the chat to load older messages.');
+  return { createdAt: Number(parts[1]), id: parts[2] };
 }
 
 export async function sendMessage(team: Team, author: string, body: string) {
