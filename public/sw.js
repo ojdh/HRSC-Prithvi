@@ -1,6 +1,6 @@
-// Prithvi FC service worker. It caches only the offline page and the app icons, never pages, API
+// HRSC–Prithvi service worker. It caches only the offline page and the app icons, never pages, API
 // answers, invitations, votes or member media, and it shows chat notifications.
-const CACHE = 'prithvi-shell-v2';
+const CACHE = 'prithvi-shell-v3';
 // Cloudflare serves public/offline.html at /offline (its .html address redirects there), and a page load cannot be
 // answered with a redirected response, so the worker caches and serves /offline.
 const OFFLINE = '/offline';
@@ -24,7 +24,7 @@ self.addEventListener('fetch', event => {
 
 // Pushes carry only a title, generic text, a tag (one notification per chat) and an in-app address.
 self.addEventListener('push', event => {
-  const note = event.data ? event.data.json() : { title: 'Prithvi FC', body: 'Something new at Prithvi FC', tag: 'prithvi', url: '/winterleague' };
+  const note = event.data ? event.data.json() : { title: 'HRSC–Prithvi', body: 'Something new at HRSC–Prithvi', tag: 'prithvi', url: '/winterleague' };
   event.waitUntil(self.registration.showNotification(note.title, {
     body: note.body, tag: note.tag, renotify: true, icon: '/icons/icon-192.png', badge: '/icons/icon-192.png', data: { url: note.url },
   }));

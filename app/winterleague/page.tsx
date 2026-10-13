@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-export const metadata:Metadata={title:'Prithvi FC | Winter league'};
+export const metadata:Metadata={title:'HRSC–Prithvi | Winter league'};
 import ClubApp from '../club-app';
 import {cookies} from 'next/headers';
 import {INVITE_COOKIE} from '@/lib/server-invitations';

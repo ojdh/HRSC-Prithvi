@@ -33,8 +33,8 @@ export async function notifyChat(club: Club, room: ChatRoom, author: string) {
     const { results } = await db().prepare(`SELECT player,endpoint,p256dh,auth FROM push_subscriptions WHERE player IN (${recipients.map(() => '?').join(',')})`)
       .bind(...recipients).all<PushTarget & { player: string }>();
     const message = room === ADMIN_CHAT
-      ? { title: 'Prithvi FC', body: 'New message in Admin chat', tag: 'chat-' + room, url: '/winterleague' + routeSearch({ view: 'profile', tab: 'admin' }) }
-      : { title: 'Prithvi FC', body: `New message in ${club.teams[room].name} chat`, tag: 'chat-' + room, url: '/winterleague' + routeSearch({ view: 'teams', team: room, tab: 'chat' }) };
+      ? { title: 'HRSC–Prithvi', body: 'New message in Admin chat', tag: 'chat-' + room, url: '/winterleague' + routeSearch({ view: 'profile', tab: 'admin' }) }
+      : { title: 'HRSC–Prithvi', body: `New message in ${club.teams[room].name} chat`, tag: 'chat-' + room, url: '/winterleague' + routeSearch({ view: 'teams', team: room, tab: 'chat' }) };
     const statuses = await Promise.all(results.map(target => sendPush(target, message, keys, PUSH_TTL_SECONDS).catch((error: unknown) => {
       console.error('Push request failed', error instanceof Error ? error.name : 'unknown');
       return 0;
