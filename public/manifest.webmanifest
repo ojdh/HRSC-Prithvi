@@ -1,7 +1,7 @@
 {
-  "name": "Prithvi FC",
-  "short_name": "Prithvi FC",
-  "description": "Prithvi FC's Winter league: matchdays, results, votes and team chat.",
+  "name": "HRSC–Prithvi",
+  "short_name": "HRSC–Prithvi",
+  "description": "HRSC–Prithvi's Winter league: matchdays, results, votes and team chat.",
   "start_url": "/winterleague",
   "scope": "/",
   "display": "standalone",

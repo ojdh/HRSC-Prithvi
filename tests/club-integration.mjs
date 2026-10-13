@@ -948,7 +948,7 @@ try{
   }finally{await chats.dispose()}
   // The installable app: manifest, icons, service worker and offline page ship with the build.
   const manifest=JSON.parse(await readFile('dist/client/manifest.webmanifest','utf8'));
-  ok(manifest.name==='Prithvi FC'&&manifest.start_url==='/winterleague'&&manifest.scope==='/'&&manifest.display==='standalone','the manifest launches the Winter league as a standalone app');
+  ok(manifest.name==='HRSC–Prithvi'&&manifest.start_url==='/winterleague'&&manifest.scope==='/'&&manifest.display==='standalone','the manifest launches the Winter league as a standalone app');
   ok(manifest.icons.some(i=>i.sizes==='192x192')&&manifest.icons.some(i=>i.sizes==='512x512'&&i.purpose==='maskable'),'the manifest lists 192 px, 512 px and maskable icons');
   const pngSize=bytes=>bytes.readUInt32BE(16)+'x'+bytes.readUInt32BE(20);
   for(const icon of manifest.icons)ok(pngSize(await readFile('dist/client'+icon.src))===icon.sizes,'icon '+icon.src+' is '+icon.sizes);
@@ -1028,7 +1028,7 @@ try{
     ok(firstWave.map(p=>p.endpoint).sort().join()===[fcm('owner'),fcm('red2-laptop')].sort().join(),'teammates with notifications on are told, not the sender or other teams: '+firstWave.map(p=>p.endpoint));
     for(const p of firstWave){
       const owner=Object.values(device).find(d=>d.json.endpoint===p.endpoint),note=await decryptPush(p.body,owner);
-      ok(JSON.stringify(note)===JSON.stringify({title:'Prithvi FC',body:'New message in '+teamName+' chat',tag:'chat-red',url:'/winterleague?view=teams&tab=chat&team=red'}),'the notification names only the chat: '+JSON.stringify(note));
+      ok(JSON.stringify(note)===JSON.stringify({title:'HRSC–Prithvi',body:'New message in '+teamName+' chat',tag:'chat-red',url:'/winterleague?view=teams&tab=chat&team=red'}),'the notification names only the chat: '+JSON.stringify(note));
       ok(p.headers['content-encoding']==='aes128gcm'&&Number(p.headers.ttl)>0,'pushes are aes128gcm-encrypted with a time to live');
       ok(await signedByClub(p.headers.authorization,p.endpoint),'pushes are signed with the club’s VAPID key');
     }
@@ -1047,7 +1047,7 @@ try{
     const adminWave=pushed.splice(0);
     ok(adminWave.length===1&&adminWave[0].endpoint===fcm('owner'),'the admin chat notifies the other admins only: '+adminWave.map(p=>p.endpoint));
     const adminNote=await decryptPush(adminWave[0].body,device.owner);
-    ok(adminNote.body==='New message in Admin chat'&&adminNote.tag==='chat-admins'&&adminNote.url==='/winterleague?view=profile&tab=admin','the admin chat notification opens Club admin');
+    ok(adminNote.title==='HRSC–Prithvi'&&adminNote.body==='New message in Admin chat'&&adminNote.tag==='chat-admins'&&adminNote.url==='/winterleague?view=profile&tab=admin','the admin chat notification opens Club admin');
     // A subscription the push service reports gone is removed
     const gone=await browserSubscription(fcm('gone'));
     ok((await pushApi('push-red',{action:'subscribe',subscription:gone.json})).status===200,'a device that later expires');
