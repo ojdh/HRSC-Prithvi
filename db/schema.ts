@@ -26,3 +26,6 @@ export const chatMessages = sqliteTable('chat_messages',{id:text('id').primaryKe
 export const chatState = sqliteTable('chat_state',{team:text('team').primaryKey(),version:integer('version').notNull().default(0),lastMessageAt:integer('last_message_at')});
 // Phone notifications: one Web Push subscription per player, so turning them on on a new device replaces the old one.
 export const pushSubscriptions = sqliteTable('push_subscriptions',{player:text('player').primaryKey(),endpoint:text('endpoint').notNull(),p256dh:text('p256dh').notNull(),auth:text('auth').notNull(),createdAt:integer('created_at').notNull()});
+// Fair play votes, kept apart from player-of-the-day votes in the same way: who voted, and anonymous choices.
+export const fairPlayReceipts = sqliteTable('fair_play_receipts', {day:text('day').notNull(),player:text('player').notNull()}, t=>[primaryKey({columns:[t.day,t.player]})]);
+export const fairPlayBallots = sqliteTable('fair_play_ballots', {id:text('id').primaryKey(),day:text('day').notNull(),candidate:text('candidate').notNull()}, t=>[index('idx_fair_play_ballots_day').on(t.day)]);

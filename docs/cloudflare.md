@@ -176,7 +176,7 @@ Keep the Access policy's Allow rule pointed at the Club members group only, neve
 
 ### 6. The database: D1
 
-**Why:** the app stores the club as one JSON document, plus separate tables for vote receipts, anonymous ballots, maintenance records, the R2 ledger and the team boards (posts, comments, reactions and photo records, migration `0010`). D1 is Cloudflare's SQLite database and the app already used it.
+**Why:** the app stores the club as one JSON document, plus separate tables for vote receipts and anonymous ballots (player of the day, and fair play from migration `0014`), maintenance records, the R2 ledger and the team boards (posts, comments, reactions and photo records, migration `0010`). D1 is Cloudflare's SQLite database and the app already used it.
 
 **How:**
 

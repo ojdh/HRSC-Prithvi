@@ -22,11 +22,11 @@ export type DayDeletion = {requestedBy:string;approvals:string[]};
 export const DELETION_APPROVALS=3;
 // A game as the edit log records it: the score, goals and keepers, without the lineup.
 export type RoundSnapshot = Pick<Round,'a'|'b'|'scoreA'|'scoreB'|'winner'|'exit'|'goals'|'keepers'>;
-export type DayLogAction = 'editRound'|'undoRound'|'requestDayDeletion'|'approveDayDeletion'|'cancelDayDeletion'|'deleteDay';
+export type DayLogAction = 'editRound'|'undoRound'|'removeAttendee'|'requestDayDeletion'|'approveDayDeletion'|'cancelDayDeletion'|'deleteDay';
 export type BoardLogAction = 'removePost'|'removeComment'|'removeMessage';
 export type LogAction = DayLogAction|BoardLogAction;
-// Admin-only history of corrections and deletions, newest first. by is a player id; date keeps an entry readable once its day is gone.
-export type DayLogEntry = {id:string;at:string;by:string;action:DayLogAction;dayId:string;date:string;roundId?:string;before?:RoundSnapshot;after?:RoundSnapshot};
+// Admin-only history of corrections and deletions, newest first. by and player are player ids; date keeps an entry readable once its day is gone.
+export type DayLogEntry = {id:string;at:string;by:string;action:DayLogAction;dayId:string;date:string;roundId?:string;player?:string;before?:RoundSnapshot;after?:RoundSnapshot};
 // An admin removing someone else's board post, board comment or chat message. author is a player id; the text is never kept.
 export type BoardLogEntry = {id:string;at:string;by:string;action:BoardLogAction;team:Team;author:string};
 export type LogEntry = DayLogEntry|BoardLogEntry;
@@ -49,12 +49,17 @@ export type ChatRoom=Team|typeof ADMIN_CHAT;
 export const CHAT_LIMITS={message:1000,page:50,window:500} as const;
 export type ChatMessage={id:string;author:string;body:string;createdAt:number};
 export type ChatPage={version:number;refreshIn:number}&({unchanged:true}|{unchanged?:undefined;messages:ChatMessage[];next:string|null});
-// adminId is the owner's account: the only person who can grant or remove admin rights. admins holds player ids.
-export type Club = {adminId:string;admins:string[];teams:Record<Team,TeamInfo>;players:Player[];days:Day[];log?:LogEntry[]};
-export type PublicClub = {invitation?:{name:string;team:Team};players:Player[];days:Day[];revision:number;initialized:boolean;isAdmin:boolean;isOwner:boolean;owner:string|null;admins:string[];teams:Record<Team,TeamInfo>;me:string|null;log?:LogEntry[];polls:Record<string,{count:number;voted:boolean;tally:{candidate:string;votes:number}[]}>};
-export const emptyClub:PublicClub={players:[],days:[],revision:0,initialized:false,isAdmin:false,isOwner:false,owner:null,admins:[],teams:DEFAULT_TEAMS,me:null,polls:{}};
+// adminId is the owner's account: the only person who can grant or remove admin rights. admins and fairPlayVoters hold player ids.
+export type Club = {adminId:string;admins:string[];fairPlayVoters?:string[];teams:Record<Team,TeamInfo>;players:Player[];days:Day[];log?:LogEntry[]};
+// A vote's participation count, whether the visitor has voted, and the tally once voting closes, highest first.
+export type PollResult = {count:number;voted:boolean;tally:{candidate:string;votes:number}[]};
+// fairPlayVoters is the whole list for admins, and for anyone else only themselves if they are one.
+export type PublicClub = {invitation?:{name:string;team:Team};players:Player[];days:Day[];revision:number;initialized:boolean;isAdmin:boolean;isOwner:boolean;owner:string|null;admins:string[];fairPlayVoters:string[];teams:Record<Team,TeamInfo>;me:string|null;log?:LogEntry[];polls:Record<string,PollResult&{fairPlay:PollResult}>};
+export const emptyClub:PublicClub={players:[],days:[],revision:0,initialized:false,isAdmin:false,isOwner:false,owner:null,admins:[],fairPlayVoters:[],teams:DEFAULT_TEAMS,me:null,polls:{}};
 // Teams with no attending player among `ids`: a matchday needs all three teams present.
 export function teamsWithout(ids:string[],players:{id:string;team:Team}[]){return TEAMS.filter(t=>!players.some(p=>p.team===t&&ids.includes(p.id)));}
+// Active players attending a day: who can be voted for, in either vote.
+export function voteCandidates(players:Player[],day:Day){return day.roster.filter(r=>players.find(p=>p.id===r.id)?.active!==false);}
 export type ReadyDay = Day&{opening:[Team,Team];firstExit:Team};
 export const isReady=(day:Day):day is ReadyDay=>!!day.opening&&!!day.firstExit;
 export function nextMatch(day:ReadyDay):{a:Team;b:Team;waiting:Team;incumbent:Team} {
@@ -156,7 +161,7 @@ export function dateStrip(days:Day[],today:string){return [...days].sort((a,b)=>
 export function homeAction(day:Day,today:string):'vote'|'live'|'results'|'preview'{return day.poll==='open'?'vote':day.date===today&&isReady(day)&&day.poll!=='closed'&&!day.ended?'live':isPlayed(day)?'results':'preview';}
 // The teams at the top of a matchday's own table; level teams share the day.
 export function dayWinners(day:Day){const table=teamStats([day]);return table.filter(s=>tablePosition(table,s.team)===1).map(s=>s.team);}
-// Player of the day: everyone tied on the most votes. A closed poll's tally arrives sorted by votes, highest first.
+// Player of the day or the fair play award: everyone tied on the most votes. A closed poll's tally arrives sorted by votes, highest first.
 export function awardWinners(tally:{candidate:string;votes:number}[]){const max=tally[0]?.votes||0;return tally.filter(x=>x.votes===max);}
 export function timeLabel(day:Day){return clockLabel(day.start)+'–'+clockLabel(day.end);}
 export const VIDEO_HOSTS=['youtube.com','www.youtube.com','youtu.be','vimeo.com','www.vimeo.com','drive.google.com'];
