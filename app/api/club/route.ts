@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { z } from 'zod';
 import { getUser } from '../../auth';
-import { TEAMS,DEFAULT_TEAMS,voteCandidates,MAX_SERIES_DAYS,DELETION_APPROVALS,LOG_LIMIT,nextMatch,incumbentAt,result,snapshot,isPlayed,emptyClub,isReady,isVideoUrl,validDate,weeklyDates,clubToday,type Club,type Day,type Team,type DayLogEntry,type Player } from '@/lib/club';
+import { TEAMS,DEFAULT_TEAMS,TIERS,SCORING_POSITIONS,voteCandidates,dayScores,MAX_SERIES_DAYS,DELETION_APPROVALS,LOG_LIMIT,nextMatch,incumbentAt,result,snapshot,isPlayed,emptyClub,isReady,isVideoUrl,validDate,weeklyDates,clubToday,type Club,type Day,type Tier,type Team,type DayLogEntry,type Player } from '@/lib/club';
 import { db,readClub,saveClub,check,digest,token,role,ClubError } from '@/lib/server-club';
 import {pendingInvite,findInvitation,inviteCookie} from '@/lib/server-invitations';
 import {deleteObject} from '@/lib/r2-budget';
@@ -29,9 +29,11 @@ export async function GET(req:Request){try{
   const {club,revision}=stored;const {me,owner,admin}=role(club,user.userId);
   if(!me&&!owner)return response({...emptyClub,revision,initialized:true,invitation});
   const days=club.days.filter(d=>d.poll!=='ready'),[playerOfTheDay,fairPlay]=await Promise.all([pollResults('vote_receipts','ballots',days,me?.id),pollResults('fair_play_receipts','fair_play_ballots',days,me?.id)]);
-  const polls=Object.fromEntries(days.map(d=>[d.id,{...playerOfTheDay[d.id],fairPlay:fairPlay[d.id]}]));
+  // Players see only each closed day's combined scores; the tally behind them, like tiers and scoring positions, is for admins.
+  const polls=Object.fromEntries(days.map(d=>{const votes=playerOfTheDay[d.id];
+    return [d.id,{...votes,tally:admin?votes.tally:[],fairPlay:fairPlay[d.id],...(d.poll==='closed'?{scores:dayScores(d,club.players,votes.tally).map(s=>({candidate:s.id,score:Math.round(s.score*10)/10}))}:{})}];}));
   const fairPlayVoters=club.fairPlayVoters??[];
-  return response({initialized:true,revision,isAdmin:admin,isOwner:owner,owner:club.players.find(p=>p.userId===club.adminId)?.id??null,admins:club.admins,fairPlayVoters:admin?fairPlayVoters:fairPlayVoters.filter(v=>v===me?.id),teams:club.teams,me:me?.id??null,players:club.players.map(({userId,inviteHash,legacyInviteHash,inviteToken,email,accessEmail,...p})=>({...p,linked:!!userId,...(admin?{email,accessEmail}:{})})),days:admin?club.days:club.days.map(({deletion,...d})=>d),polls,...(admin?{log:club.log??[]}:{})});
+  return response({initialized:true,revision,isAdmin:admin,isOwner:owner,owner:club.players.find(p=>p.userId===club.adminId)?.id??null,admins:club.admins,fairPlayVoters:admin?fairPlayVoters:fairPlayVoters.filter(v=>v===me?.id),teams:club.teams,me:me?.id??null,players:club.players.map(({userId,inviteHash,legacyInviteHash,inviteToken,email,accessEmail,tier,scoringPosition,...p})=>({...p,linked:!!userId,...(admin?{email,accessEmail,tier,scoringPosition}:{})})),days:admin?club.days:club.days.map(({deletion,...d})=>d),polls,...(admin?{log:club.log??[]}:{})});
 }catch(e){return fail(e);}}
 export async function POST(req:Request){try{
   const origin=req.headers.get('origin');check(!origin||origin===new URL(req.url).origin,'This request must come from the club website.',403);
@@ -115,6 +117,10 @@ export async function POST(req:Request){try{
       const input=z.object({playerId:id,voter:z.boolean()}).parse(body);const p=club.players.find(p=>p.id===input.playerId&&(!input.voter||p.active!==false));check(p,'Active player not found.');
       const voters=club.fairPlayVoters??[];check(voters.includes(p.id)!==input.voter,input.voter?'This player already votes for fair play.':'This player does not vote for fair play.');
       club.fairPlayVoters=input.voter?[...voters,p.id]:voters.filter(v=>v!==p.id);
+    }else if(action==='setScoring'){
+      const input=z.object({playerId:id,tier:z.number().int().refine((t):t is Tier=>TIERS.includes(t as Tier),'Choose a tier from 1 to 5.'),scoringPosition:z.enum(SCORING_POSITIONS)}).parse(body);
+      const p=club.players.find(p=>p.id===input.playerId&&p.active!==false);check(p,'Active player not found.');
+      Object.assign(p,{tier:input.tier,scoringPosition:input.scoringPosition});
     }else if(action==='setCaptain'){
       const input=z.object({team,playerId:id.nullable()}).parse(body);
       if(input.playerId){const p=club.players.find(p=>p.id===input.playerId&&p.active!==false);check(p&&p.team===input.team,'Choose an active player from this team as captain.');club.teams[input.team].captain=p.id;}

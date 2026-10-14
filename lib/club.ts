@@ -8,8 +8,13 @@ export const DEFAULT_TEAMS: Record<Team,TeamInfo> = {
   white:{name:'Team White',color:'#eceddf',letter:'W',motto:'Make your mark.'},
 };
 export type Highlight = {id:string;key:string;kind:'Goal'|'Assist'|'Save'|'Skill'|'Foul'|'Other';note:string};
+// The position and tier that value a player's goals and assists in the combined score. Admins set them and only admins see them.
+export const SCORING_POSITIONS=['Goalkeeper','Defender','Midfielder','Forward'] as const;
+export type ScoringPosition=typeof SCORING_POSITIONS[number];
+export const TIERS=[1,2,3,4,5] as const;
+export type Tier=typeof TIERS[number];
 // email is admin-set on an unclaimed player; accessEmail is the email the app added to the club-members Access group.
-export type Player = {id:string;name:string;team:Team;birthYear?:number|null;birthMonth?:number|null;height:number|null;position:string;number?:number|null;district?:string|null;active?:boolean;photo:string|null;highlights?:Highlight[];userId?:string;inviteHash?:string;legacyInviteHash?:string;inviteToken?:string;linked?:boolean;email?:string|null;accessEmail?:string|null};
+export type Player = {id:string;name:string;team:Team;birthYear?:number|null;birthMonth?:number|null;height:number|null;position:string;number?:number|null;district?:string|null;active?:boolean;photo:string|null;highlights?:Highlight[];userId?:string;inviteHash?:string;legacyInviteHash?:string;inviteToken?:string;linked?:boolean;email?:string|null;accessEmail?:string|null;tier?:Tier|null;scoringPosition?:ScoringPosition|null};
 export type Goal = {team:Team;scorer:string|null;assist:string|null;ownGoal:boolean};
 // Each playing team's goalkeeper for one game, by player id; games recorded before keepers existed have none.
 export type Keepers = Partial<Record<Team,string>>;
@@ -52,9 +57,11 @@ export type ChatPage={version:number;refreshIn:number}&({unchanged:true}|{unchan
 // adminId is the owner's account: the only person who can grant or remove admin rights. admins and fairPlayVoters hold player ids.
 export type Club = {adminId:string;admins:string[];fairPlayVoters?:string[];teams:Record<Team,TeamInfo>;players:Player[];days:Day[];log?:LogEntry[]};
 // A vote's participation count, whether the visitor has voted, and the tally once voting closes, highest first.
+// Player-of-the-day tallies reach admins only; everyone gets that day's combined scores once voting closes.
 export type PollResult = {count:number;voted:boolean;tally:{candidate:string;votes:number}[]};
+export type CombinedScore = {candidate:string;score:number};
 // fairPlayVoters is the whole list for admins, and for anyone else only themselves if they are one.
-export type PublicClub = {invitation?:{name:string;team:Team};players:Player[];days:Day[];revision:number;initialized:boolean;isAdmin:boolean;isOwner:boolean;owner:string|null;admins:string[];fairPlayVoters:string[];teams:Record<Team,TeamInfo>;me:string|null;log?:LogEntry[];polls:Record<string,PollResult&{fairPlay:PollResult}>};
+export type PublicClub = {invitation?:{name:string;team:Team};players:Player[];days:Day[];revision:number;initialized:boolean;isAdmin:boolean;isOwner:boolean;owner:string|null;admins:string[];fairPlayVoters:string[];teams:Record<Team,TeamInfo>;me:string|null;log?:LogEntry[];polls:Record<string,PollResult&{fairPlay:PollResult;scores?:CombinedScore[]}>};
 export const emptyClub:PublicClub={players:[],days:[],revision:0,initialized:false,isAdmin:false,isOwner:false,owner:null,admins:[],fairPlayVoters:[],teams:DEFAULT_TEAMS,me:null,polls:{}};
 // Teams with no attending player among `ids`: a matchday needs all three teams present.
 export function teamsWithout(ids:string[],players:{id:string;team:Team}[]){return TEAMS.filter(t=>!players.some(p=>p.team===t&&ids.includes(p.id)));}
@@ -161,7 +168,34 @@ export function dateStrip(days:Day[],today:string){return [...days].sort((a,b)=>
 export function homeAction(day:Day,today:string):'vote'|'live'|'results'|'preview'{return day.poll==='open'?'vote':day.date===today&&isReady(day)&&day.poll!=='closed'&&!day.ended?'live':isPlayed(day)?'results':'preview';}
 // The teams at the top of a matchday's own table; level teams share the day.
 export function dayWinners(day:Day){const table=teamStats([day]);return table.filter(s=>tablePosition(table,s.team)===1).map(s=>s.team);}
-// Player of the day or the fair play award: everyone tied on the most votes. A closed poll's tally arrives sorted by votes, highest first.
+// Scoring values: a goal or an assist is worth the average of its scorer's position value and tier value. Tier 1 is the
+// strongest group, so its goals are worth least. Keepers and defenders start from a base and lose points per goal conceded.
+const POSITION_POINTS:Record<ScoringPosition,{goal:number;assist:number}>={Goalkeeper:{goal:15,assist:10},Defender:{goal:12,assist:8},Midfielder:{goal:8,assist:5},Forward:{goal:5,assist:4}};
+const TIER_POINTS:Record<Tier,{goal:number;assist:number}>={1:{goal:5,assist:4},2:{goal:7,assist:5},3:{goal:10,assist:7},4:{goal:13,assist:10},5:{goal:15,assist:10}};
+const DEFENCE_BASE:Partial<Record<ScoringPosition,number>>={Goalkeeper:20,Defender:15};
+const CONCEDED_PENALTY=2,GAME_POINTS=1,DEFAULT_TIER:Tier=3;
+// A player's scoring until an admin sets it: tier 3, and the position from their profile, with an all-rounder counted as a midfielder.
+export function scoringOf(p:Player):{position:ScoringPosition;tier:Tier}{return {position:p.scoringPosition??(SCORING_POSITIONS.find(x=>x===p.position)??'Midfielder'),tier:p.tier??DEFAULT_TIER};}
+// Each active attending player's combined score for a day, highest first: stat points and votes, each divided by the day's
+// highest and worth 50, out of 100. Goals conceded are those against the player's team in the games they played; own goals
+// count against the conceding team but earn nobody points. A defensive score can go below zero.
+export function dayScores(day:Day,players:Player[],tally:{candidate:string;votes:number}[]){
+  const lines=voteCandidates(players,day).map(r=>{
+    const p=players.find(x=>x.id===r.id)!,{position,tier}=scoringOf(p);let goals=0,assists=0,games=0,conceded=0;
+    for(const round of day.rounds){
+      if(round.lineup.includes(p.id)){games++;conceded+=round.goals.filter(g=>g.team!==r.team).length;}
+      for(const g of round.goals)if(!g.ownGoal){if(g.scorer===p.id)goals++;if(g.assist===p.id)assists++;}
+    }
+    const goal=(POSITION_POINTS[position].goal+TIER_POINTS[tier].goal)/2,assist=(POSITION_POINTS[position].assist+TIER_POINTS[tier].assist)/2,base=DEFENCE_BASE[position];
+    const points=goals*goal+assists*assist+games*GAME_POINTS+(base===undefined?0:base-CONCEDED_PENALTY*conceded);
+    return {id:p.id,goals,assists,games,conceded,points,votes:tally.find(t=>t.candidate===p.id)?.votes??0};
+  });
+  const maxPoints=Math.max(0,...lines.map(l=>l.points)),maxVotes=Math.max(0,...lines.map(l=>l.votes));
+  return lines.map(l=>({...l,score:(maxPoints?50*l.points/maxPoints:0)+(maxVotes?50*l.votes/maxVotes:0)})).sort((a,b)=>b.score-a.score);
+}
+// Player of the day: everyone tied on the highest combined score, if it is above zero. Scores arrive highest first.
+export function bestPlayers(scores:CombinedScore[]){const top=scores[0]?.score??0;return top>0?scores.filter(s=>s.score===top):[];}
+// The fair play award: everyone tied on the most votes. A closed poll's tally arrives sorted by votes, highest first.
 export function awardWinners(tally:{candidate:string;votes:number}[]){const max=tally[0]?.votes||0;return tally.filter(x=>x.votes===max);}
 export function timeLabel(day:Day){return clockLabel(day.start)+'–'+clockLabel(day.end);}
 export const VIDEO_HOSTS=['youtube.com','www.youtube.com','youtu.be','vimeo.com','www.vimeo.com','drive.google.com'];
