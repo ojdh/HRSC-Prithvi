@@ -27,7 +27,7 @@ export type DayDeletion = {requestedBy:string;approvals:string[]};
 export const DELETION_APPROVALS=3;
 // A game as the edit log records it: the score, goals and keepers, without the lineup.
 export type RoundSnapshot = Pick<Round,'a'|'b'|'scoreA'|'scoreB'|'winner'|'exit'|'goals'|'keepers'>;
-export type DayLogAction = 'editRound'|'undoRound'|'removeAttendee'|'requestDayDeletion'|'approveDayDeletion'|'cancelDayDeletion'|'deleteDay';
+export type DayLogAction = 'editRound'|'undoRound'|'addAttendee'|'removeAttendee'|'requestDayDeletion'|'approveDayDeletion'|'cancelDayDeletion'|'deleteDay';
 export type BoardLogAction = 'removePost'|'removeComment'|'removeMessage';
 export type LogAction = DayLogAction|BoardLogAction;
 // Admin-only history of corrections and deletions, newest first. by and player are player ids; date keeps an entry readable once its day is gone.
