@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { z } from 'zod';
 import { getUser } from '../../auth';
-import { TEAMS,DEFAULT_TEAMS,MAX_SERIES_DAYS,DELETION_APPROVALS,LOG_LIMIT,nextMatch,incumbentAt,result,snapshot,isPlayed,emptyClub,isReady,isVideoUrl,validDate,weeklyDates,clubToday,type Club,type Day,type Team,type DayLogEntry,type Player } from '@/lib/club';
+import { TEAMS,DEFAULT_TEAMS,voteCandidates,MAX_SERIES_DAYS,DELETION_APPROVALS,LOG_LIMIT,nextMatch,incumbentAt,result,snapshot,isPlayed,emptyClub,isReady,isVideoUrl,validDate,weeklyDates,clubToday,type Club,type Day,type Team,type DayLogEntry,type Player } from '@/lib/club';
 import { db,readClub,saveClub,check,digest,token,role,ClubError } from '@/lib/server-club';
 import {pendingInvite,findInvitation,inviteCookie} from '@/lib/server-invitations';
 import {deleteObject} from '@/lib/r2-budget';
@@ -28,15 +28,10 @@ export async function GET(req:Request){try{
   if(!user)return response({...emptyClub,initialized:true,invitation});
   const {club,revision}=stored;const {me,owner,admin}=role(club,user.userId);
   if(!me&&!owner)return response({...emptyClub,revision,initialized:true,invitation});
-  const polls:Record<string,unknown>={};
-  const counts=(await db().prepare('SELECT day,COUNT(*) AS n FROM vote_receipts GROUP BY day').all<{day:string;n:number}>()).results;
-  const mine=me?(await db().prepare('SELECT day FROM vote_receipts WHERE player=?').bind(me.id).all<{day:string}>()).results:[];
-  const tallies=(await db().prepare('SELECT day,candidate,COUNT(*) AS votes FROM ballots GROUP BY day,candidate ORDER BY votes DESC,candidate').all<{day:string;candidate:string;votes:number}>()).results;
-  for(const day of club.days.filter(d=>d.poll!=='ready')){
-    const tally=day.poll==='closed'?tallies.filter(t=>t.day===day.id).map(({candidate,votes})=>({candidate,votes})):[];
-    polls[day.id]={count:counts.find(x=>x.day===day.id)?.n??0,voted:mine.some(x=>x.day===day.id),tally};
-  }
-  return response({initialized:true,revision,isAdmin:admin,isOwner:owner,owner:club.players.find(p=>p.userId===club.adminId)?.id??null,admins:club.admins,teams:club.teams,me:me?.id??null,players:club.players.map(({userId,inviteHash,legacyInviteHash,inviteToken,email,accessEmail,...p})=>({...p,linked:!!userId,...(admin?{email,accessEmail}:{})})),days:admin?club.days:club.days.map(({deletion,...d})=>d),polls,...(admin?{log:club.log??[]}:{})});
+  const days=club.days.filter(d=>d.poll!=='ready'),[playerOfTheDay,fairPlay]=await Promise.all([pollResults('vote_receipts','ballots',days,me?.id),pollResults('fair_play_receipts','fair_play_ballots',days,me?.id)]);
+  const polls=Object.fromEntries(days.map(d=>[d.id,{...playerOfTheDay[d.id],fairPlay:fairPlay[d.id]}]));
+  const fairPlayVoters=club.fairPlayVoters??[];
+  return response({initialized:true,revision,isAdmin:admin,isOwner:owner,owner:club.players.find(p=>p.userId===club.adminId)?.id??null,admins:club.admins,fairPlayVoters:admin?fairPlayVoters:fairPlayVoters.filter(v=>v===me?.id),teams:club.teams,me:me?.id??null,players:club.players.map(({userId,inviteHash,legacyInviteHash,inviteToken,email,accessEmail,...p})=>({...p,linked:!!userId,...(admin?{email,accessEmail}:{})})),days:admin?club.days:club.days.map(({deletion,...d})=>d),polls,...(admin?{log:club.log??[]}:{})});
 }catch(e){return fail(e);}}
 export async function POST(req:Request){try{
   const origin=req.headers.get('origin');check(!origin||origin===new URL(req.url).origin,'This request must come from the club website.',403);
@@ -55,21 +50,21 @@ export async function POST(req:Request){try{
   check(stored,'The organiser needs to set up the club first.');const {club,revision}=stored;
   const {me,owner,admin}=role(club,user.userId);
   if(action==='vote'){
-    const input=z.object({dayId:id,candidates:z.array(id).min(1).max(2)}).parse(body);const day=club.days.find(d=>d.id===input.dayId);check(day&&day.poll==='open','Voting is not open for this match day.');
-    const voter=day.roster.find(p=>p.id===me?.id);
-    check(voter&&me?.active!==false,'Only active players marked as attending can vote.',403);
-    // A ballot names one active attending player from each opposing team that has one.
-    const eligible=day.roster.filter(p=>p.team!==voter.team&&club.players.find(x=>x.id===p.id)?.active!==false);
+    const input=z.object({dayId:id,candidates:z.array(id).min(1).max(TEAMS.length)}).parse(body);const day=club.days.find(d=>d.id===input.dayId);check(day&&day.poll==='open','Voting is not open for this match day.');
+    check(me&&me.active!==false&&day.roster.some(p=>p.id===me.id),'Only active players marked as attending can vote.',403);
+    // A ballot names one active attending player from each team that has one, the voter's own team included; never the voter.
+    const eligible=voteCandidates(club.players,day).filter(p=>p.id!==me.id);
     const picks=input.candidates.map(c=>eligible.find(p=>p.id===c)),teams=new Set(eligible.map(p=>p.team));
-    check(picks.every(p=>p)&&new Set(picks.map(p=>p!.team)).size===picks.length&&picks.length===teams.size,'Choose one active player from each of the other two teams.');
-    try{
-      // Each ballot is stored only if the statement before it stored a row, so the receipt and every ballot land together.
-      const r=await db().batch([
-        db().prepare('INSERT INTO vote_receipts (day,player) SELECT ?,? WHERE EXISTS (SELECT 1 FROM club WHERE id=1 AND revision=?)').bind(day.id,me!.id,revision),
-        ...picks.map(p=>db().prepare('INSERT INTO ballots (id,day,candidate) SELECT ?,?,? WHERE changes()=1').bind(crypto.randomUUID(),day.id,p!.id)),
-      ]);
-      check(r.every(x=>x.meta.changes===1),'The match day changed. Refresh and vote again.',409);
-    }catch(e){if(e instanceof ClubError)throw e;if(String(e).includes('UNIQUE'))throw new ClubError('Your vote has already been recorded.',409);throw e;}
+    check(picks.every(p=>p)&&new Set(picks.map(p=>p!.team)).size===picks.length&&picks.length===teams.size,'Choose one active player from each team. You cannot vote for yourself.');
+    await castBallots('vote_receipts','ballots',day.id,me.id,picks.map(p=>p!.id),revision);
+    return response({ok:true});
+  }
+  if(action==='fairPlayVote'){
+    const input=z.object({dayId:id,candidate:id}).parse(body);
+    check(me&&me.active!==false&&(club.fairPlayVoters??[]).includes(me.id),'Only fair-play voters chosen by the admins can vote for fair play.',403);
+    const day=club.days.find(d=>d.id===input.dayId);check(day&&day.poll==='open','Voting is not open for this match day.');
+    check(input.candidate!==me.id&&voteCandidates(club.players,day).some(p=>p.id===input.candidate),'Choose one active attending player other than yourself.');
+    await castBallots('fair_play_receipts','fair_play_ballots',day.id,me.id,[input.candidate],revision);
     return response({ok:true});
   }
   check(body.revision===revision,'The club was updated. Refresh before saving this change.',409);
@@ -115,6 +110,11 @@ export async function POST(req:Request){try{
       const input=z.object({team,name:z.string().trim().min(1).max(30),letter:z.string().trim().min(1).max(2).transform(s=>s.toUpperCase()),color:z.string().regex(/^#[0-9a-fA-F]{6}$/,'Choose a colour like #1f7a4d.').transform(s=>s.toLowerCase()),motto:z.string().trim().max(60)}).parse(body);
       check(TEAMS.every(t=>t===input.team||club.teams[t].name.toLowerCase()!==input.name.toLowerCase()),'Each team needs its own name.');
       club.teams[input.team]={...club.teams[input.team],name:input.name,color:input.color,letter:input.letter,motto:input.motto};
+    }else if(action==='setFairPlayVoter'){
+      // A removed player can still be taken off the list, but only active players are added.
+      const input=z.object({playerId:id,voter:z.boolean()}).parse(body);const p=club.players.find(p=>p.id===input.playerId&&(!input.voter||p.active!==false));check(p,'Active player not found.');
+      const voters=club.fairPlayVoters??[];check(voters.includes(p.id)!==input.voter,input.voter?'This player already votes for fair play.':'This player does not vote for fair play.');
+      club.fairPlayVoters=input.voter?[...voters,p.id]:voters.filter(v=>v!==p.id);
     }else if(action==='setCaptain'){
       const input=z.object({team,playerId:id.nullable()}).parse(body);
       if(input.playerId){const p=club.players.find(p=>p.id===input.playerId&&p.active!==false);check(p&&p.team===input.team,'Choose an active player from this team as captain.');club.teams[input.team].captain=p.id;}
@@ -133,15 +133,26 @@ export async function POST(req:Request){try{
       const created:Day[]=fresh.map(d=>({id:crypto.randomUUID(),date:d,start:input.start,end:input.end,roster:[],opening:null,firstExit:null,rounds:[],poll:'ready'}));
       club.days.push(...created);extra={dayIds:created.map(d=>d.id),skipped:dates.filter(d=>!fresh.includes(d))};
     }else if(action==='setupDay'){
-      const input=z.object({dayId:id,roster:z.array(id).min(3),a:team,b:team,firstExit:team}).parse(body);const day=editableDay(club,input.dayId,'Attendance is locked after voting opens or results are entered.');
+      const input=z.object({dayId:id,a:team,b:team,firstExit:team}).parse(body);const day=editableDay(club,input.dayId,'Opening teams are locked after voting opens or results are entered.');
       check(input.a!==input.b,'Choose two different opening teams.');check([input.a,input.b].includes(input.firstExit),'The first draw exit must be an opening team.');
-      const roster=[...new Set(input.roster)].map(pid=>attendee(club,pid));
-      check(TEAMS.every(t=>roster.some(p=>p.team===t)),'Mark at least one attending player from each team.');
+      // Everyone active attends by default; admins then remove whoever did not come. Updating the teams keeps that attendance.
+      const roster=isReady(day)?day.roster:club.players.filter(p=>p.active!==false).map(p=>attendee(club,p.id));
+      check(TEAMS.every(t=>roster.some(p=>p.team===t)),'Every team needs at least one active player. Add players on the team pages first.');
       Object.assign(day,{roster,opening:[input.a,input.b],firstExit:input.firstExit});
     }else if(action==='addAttendee'){
       const input=z.object({dayId:id,playerId:id}).parse(body);const day=club.days.find(d=>d.id===input.dayId);check(day,'Match day not found.');
       check(isReady(day),'Set up the matchday before adding late arrivals.');check(day.poll==='ready','Attendance is locked once voting opens.');
       check(!day.roster.some(r=>r.id===input.playerId),'This player is already marked as attending.');day.roster.push(attendee(club,input.playerId));
+    }else if(action==='removeAttendee'){
+      const input=z.object({dayId:id,playerId:id}).parse(body);const day=club.days.find(d=>d.id===input.dayId);check(day,'Match day not found.');
+      check(isReady(day),'Set up the matchday before changing attendance.');
+      const player=day.roster.find(r=>r.id===input.playerId);check(player,'This player is not marked as attending.');
+      // Their stats that day would otherwise point at someone who was not there, so those games are corrected first.
+      check(!day.rounds.some(r=>r.goals.some(g=>g.scorer===player.id||g.assist===player.id)||Object.values(r.keepers??{}).includes(player.id)),'This player has a goal, an assist or a game in goal on this day. Edit those games first.');
+      const sole=day.rounds.findIndex(r=>r.lineup.includes(player.id)&&!r.lineup.some(pid=>pid!==player.id&&day.roster.some(p=>p.id===pid&&p.team===player.team)));
+      check(sole<0,`This player is their team’s only player in game ${sole+1}. Edit that game first.`);
+      day.roster=day.roster.filter(r=>r.id!==player.id);for(const r of day.rounds)r.lineup=r.lineup.filter(pid=>pid!==player.id);
+      record(club,actor(me),'removeAttendee',day,{player:player.id});
     }else if(action==='editDay'){
       const input=slot.extend({dayId:id,date}).refine(...endsAfterStart).parse(body);const day=editableDay(club,input.dayId,'Match days cannot be moved after voting opens or results are entered.');
       check(!club.days.some(d=>d.id!==day.id&&d.date===input.date),'There is already a match day on that date.');Object.assign(day,{date:input.date,start:input.start,end:input.end});
@@ -189,11 +200,29 @@ export async function POST(req:Request){try{
   }
   if(access)await saveClubWithAccess(club,revision,access.change,access.apply);else await saveClub(club,revision);
   if(deleted){
-    await db().batch([db().prepare('DELETE FROM ballots WHERE day=?').bind(deleted.id),db().prepare('DELETE FROM vote_receipts WHERE day=?').bind(deleted.id)]);
+    await db().batch(['ballots','vote_receipts','fair_play_ballots','fair_play_receipts'].map(table=>db().prepare(`DELETE FROM ${table} WHERE day=?`).bind(deleted.id)));
     if(deleted.videoKey)await deleteObject(deleted.videoKey);
   }
   const reply=response({ok:true,...extra,...(deleted?{deleted:true}:{})});if(action==='claim')reply.headers.set('Set-Cookie',inviteCookie('',new URL(req.url).protocol==='https:'));return reply;
 }catch(e){return fail(e);}}
+// Stores one voter's receipt and their anonymous ballots together, only if the club has not changed since it was read.
+async function castBallots(receipts:'vote_receipts'|'fair_play_receipts',ballots:'ballots'|'fair_play_ballots',dayId:string,voter:string,picks:string[],revision:number){
+  try{
+    // Each ballot is stored only if the statement before it stored a row, so the receipt and every ballot land together.
+    const r=await db().batch([
+      db().prepare(`INSERT INTO ${receipts} (day,player) SELECT ?,? WHERE EXISTS (SELECT 1 FROM club WHERE id=1 AND revision=?)`).bind(dayId,voter,revision),
+      ...picks.map(pick=>db().prepare(`INSERT INTO ${ballots} (id,day,candidate) SELECT ?,?,? WHERE changes()=1`).bind(crypto.randomUUID(),dayId,pick)),
+    ]);
+    check(r.every(x=>x.meta.changes===1),'The match day changed. Refresh and vote again.',409);
+  }catch(e){if(e instanceof ClubError)throw e;if(String(e).includes('UNIQUE'))throw new ClubError('Your vote has already been recorded.',409);throw e;}
+}
+// Each day's participation count, whether `player` has voted, and the tally once that day's voting has closed.
+async function pollResults(receipts:'vote_receipts'|'fair_play_receipts',ballots:'ballots'|'fair_play_ballots',days:Day[],player:string|undefined){
+  const counts=(await db().prepare(`SELECT day,COUNT(*) AS n FROM ${receipts} GROUP BY day`).all<{day:string;n:number}>()).results;
+  const mine=player?(await db().prepare(`SELECT day FROM ${receipts} WHERE player=?`).bind(player).all<{day:string}>()).results:[];
+  const tallies=(await db().prepare(`SELECT day,candidate,COUNT(*) AS votes FROM ${ballots} GROUP BY day,candidate ORDER BY votes DESC,candidate`).all<{day:string;candidate:string;votes:number}>()).results;
+  return Object.fromEntries(days.map(day=>[day.id,{count:counts.find(x=>x.day===day.id)?.n??0,voted:mine.some(x=>x.day===day.id),tally:day.poll==='closed'?tallies.filter(t=>t.day===day.id).map(({candidate,votes})=>({candidate,votes})):[]}]));
+}
 function attendee(club:Club,playerId:string){const p=club.players.find(x=>x.id===playerId&&x.active!==false);check(p,'An active attending player is missing.');return {id:p.id,team:p.team};}
 function editableDay(club:Club,dayId:string,locked:string){const day=club.days.find(d=>d.id===dayId);check(day,'Match day not found.');check(day.poll==='ready'&&!day.rounds.length,locked);return day;}
 // Validates a game's lineup, keepers, goals and score for the two teams that played it, and returns the de-duplicated lineup.
@@ -209,7 +238,7 @@ function playedLineup(day:Day,a:Team,b:Team,input:z.infer<typeof roundInput>){
 }
 // The edit log names people by player id, so these actions need the admin's player profile.
 function actor(me:{id:string}|undefined){check(me,'Link your player profile before changing match records.',403);return me.id;}
-function record(club:Club,by:string,action:DayLogEntry['action'],day:Day,details:Pick<DayLogEntry,'roundId'|'before'|'after'>={}){
+function record(club:Club,by:string,action:DayLogEntry['action'],day:Day,details:Pick<DayLogEntry,'roundId'|'player'|'before'|'after'>={}){
   club.log=[{id:crypto.randomUUID(),at:new Date().toISOString(),by,action,dayId:day.id,date:day.date,...details},...(club.log??[])].slice(0,LOG_LIMIT);
 }
 // Deletes the day once the owner has approved or enough current admins have. Approvals from people who are no

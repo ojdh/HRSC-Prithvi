@@ -257,7 +257,7 @@ footer{color:var(--muted);font-size:.9rem;margin-top:48px;border-top:1px solid v
 <p><code>prithvifc.ca</code> is a zone on the club's Cloudflare account. It's on the Free plan, uses Cloudflare's nameservers, and its status is active (checked through the Cloudflare API). The domain needs to be on the same account so the Worker can claim it as a custom domain and Access can protect paths on it.</p>
 
 <h3 id="detail-d1">6. The database: D1</h3>
-<p><strong>Why:</strong> the app stores the club as one JSON document, plus separate tables for vote receipts, anonymous ballots, maintenance records, the R2 ledger and the team boards (posts, comments, reactions and photo records, migration <code>0010</code>). D1 is Cloudflare's SQLite database and the app already used it.</p>
+<p><strong>Why:</strong> the app stores the club as one JSON document, plus separate tables for vote receipts and anonymous ballots (player of the day, and fair play from migration <code>0014</code>), maintenance records, the R2 ledger and the team boards (posts, comments, reactions and photo records, migration <code>0010</code>). D1 is Cloudflare's SQLite database and the app already used it.</p>
 <p><strong>How:</strong></p>
 <ul>
   <li>Created with <code>wrangler d1 create hrsc-prithvi</code> in Western North America.</li>

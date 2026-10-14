@@ -114,22 +114,27 @@ try{
   const scheduled=(await get('black-user')).data.days[0];ok(scheduled.roster.length===0&&scheduled.opening===null&&scheduled.start==='07:00'&&scheduled.end==='08:30','scheduled day waits for attendance');
   ok((await post('openPoll',{dayId})).status===400,'voting needs a set-up match day');
   ok((await post('addRound',{dayId,scoreA:0,scoreB:0,lineup:roster,goals:[]})).status===400,'rounds need a set-up match day');
-  for(const bad of [{a:'red',b:'red'},{firstExit:'white'},{roster:[owner.id,red.id,black.id]}])ok((await post('setupDay',{dayId,roster,a:'red',b:'black',firstExit:'red',...bad})).status===400,'invalid matchday setup rejected: '+JSON.stringify(bad));
-  await success('setupDay',{dayId,roster,a:'red',b:'black',firstExit:'red'});
-  const futureId=(await success('addDays',{from:'2099-01-04',start:'07:00',end:'08:30'})).dayIds[0];await success('setupDay',{dayId:futureId,roster,a:'red',b:'black',firstExit:'red'});
+  for(const bad of [{a:'red',b:'red'},{firstExit:'white'}])ok((await post('setupDay',{dayId,a:'red',b:'black',firstExit:'red',...bad})).status===400,'invalid matchday setup rejected: '+JSON.stringify(bad));
+  await success('setupDay',{dayId,a:'red',b:'black',firstExit:'red'});
+  ok(JSON.stringify((await get()).data.days[0].roster.map(p=>p.id).sort())===JSON.stringify([...roster,absent.id].sort()),'every active player attends by default');
+  ok((await post('removeAttendee',{dayId,playerId:absent.id},'black-user')).status===403,'players cannot remove attendees');
+  await success('removeAttendee',{dayId,playerId:absent.id});
+  ok(!(await get()).data.days[0].roster.some(p=>p.id===absent.id),'an admin removes a player who did not come');
+  ok((await post('removeAttendee',{dayId,playerId:absent.id})).status===400,'a player who is not attending cannot be removed');
+  const futureId=(await success('addDays',{from:'2099-01-04',start:'07:00',end:'08:30'})).dayIds[0];await success('setupDay',{dayId:futureId,a:'red',b:'black',firstExit:'red'});
   ok((await post('openPoll',{dayId:futureId})).status===400,'voting cannot open before the match day');await success('deleteDay',{dayId:futureId});
   await success('openPoll',{dayId});
   ok((await get()).data.days[0].rounds.length===0,'voting opens before any stats');
-  ok((await post('setupDay',{dayId,roster:[...roster,absent.id],a:'red',b:'black',firstExit:'red'})).status===400,'vote eligibility roster locked');
-  ok((await post('vote',{dayId,candidates:[red.id,black.id]})).status===400,'own-team ballot blocked');
-  ok((await post('vote',{dayId,candidates:[black.id]})).status===400,'a ballot needs one player from each opposing team');
-  ok((await post('vote',{dayId,candidates:[black.id,black.id]})).status===400,'both picks cannot come from the same team');
+  ok((await post('setupDay',{dayId,a:'red',b:'white',firstExit:'red'})).status===400,'opening teams locked once voting opens');
+  ok((await post('vote',{dayId,candidates:[owner.id,black.id,white.id]})).status===400,'a player cannot vote for themselves');
+  ok((await post('vote',{dayId,candidates:[black.id,white.id]})).status===400,'a ballot needs one player from every team, the voter\'s own included');
+  ok((await post('vote',{dayId,candidates:[red.id,black.id,black.id]})).status===400,'two picks cannot come from the same team');
   ok((await post('vote',{dayId,candidates:[white.id]},'absent-user')).status===403,'absent player cannot vote');
   ok((await post('vote',{dayId,candidates:[absent.id,owner.id]},'black-user')).status===400,'absent candidate blocked');
-  await success('vote',{dayId,candidates:[black.id,white.id]});
+  await success('vote',{dayId,candidates:[red.id,black.id,white.id]});
   const voteRows=async table=>(await (await mf.getD1Database('DB')).prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE day=?`).bind(dayId).first('n'));
-  ok(await voteRows('ballots')===2&&await voteRows('vote_receipts')===1,'one voter leaves one receipt and two anonymous ballots');
-  ok((await post('vote',{dayId,candidates:[black.id,white.id]})).status===409,'duplicate vote blocked');
+  ok(await voteRows('ballots')===3&&await voteRows('vote_receipts')===1,'one voter leaves one receipt and three anonymous ballots');
+  ok((await post('vote',{dayId,candidates:[red.id,black.id,white.id]})).status===409,'duplicate vote blocked');
   let v=(await get('white-user')).data.revision;
   const concurrent=await Promise.all([post('vote',{dayId,candidates:[black.id,red.id]},'white-user',v),post('vote',{dayId,candidates:[black.id,owner.id]},'white-user',v)]);
   ok(concurrent.filter(x=>x.status===200).length===1,'concurrent duplicate ballots blocked');
@@ -147,7 +152,7 @@ try{
   await success('vote',{dayId,candidates:[owner.id,white.id]},'black-user');
   await success('closePoll',{dayId});
   state=(await get()).data;ok(state.polls[dayId].tally.length>0&&state.polls[dayId].count===3,'results available only after close');
-  ok(state.polls[dayId].tally.reduce((n,t)=>n+t.votes,0)===6&&state.polls[dayId].tally.find(t=>t.candidate===black.id).votes===2,'every voter counts once for each opposing team');
+  ok(state.polls[dayId].tally.reduce((n,t)=>n+t.votes,0)===7&&state.polls[dayId].tally.find(t=>t.candidate===black.id).votes===2,'every voter counts once for each team with another attending player');
   ok((await post('vote',{dayId,candidates:[black.id,white.id]},'red-user')).status===400,'closed voting rejected');
   await success('addRound',{dayId,scoreA:0,scoreB:1,lineup:[white.id,black.id],goals:[goal('black',black.id)]});
   ok((await get()).data.days[0].rounds.length===3,'scores remain editable after poll closes');
@@ -237,7 +242,7 @@ try{
   // Goalkeepers: each team in a game can name one keeper from its own lineup; the season has no start-date floor.
   const keeperDay=(await success('addDays',{from:'2026-08-30',...slot})).dayIds[0];
   ok(keeperDay,'a matchday can be scheduled before September');
-  await success('setupDay',{dayId:keeperDay,roster,a:'red',b:'black',firstExit:'red'});
+  await success('setupDay',{dayId:keeperDay,a:'red',b:'black',firstExit:'red'});
   const keeperRound=keepers=>({dayId:keeperDay,scoreA:1,scoreB:0,lineup:[owner.id,red.id,black.id],goals:[goal('red',owner.id)],keepers});
   ok((await post('addRound',keeperRound({red:white.id}))).status===400,'a keeper must be on that team');
   ok((await post('addRound',keeperRound({white:white.id}))).status===400,'only the two playing teams have keepers');
@@ -252,7 +257,7 @@ try{
   // Ending a matchday opens voting and stops new games until an admin resumes it; saved games stay editable.
   const endId=(await success('addDays',{from:'2026-08-23',...slot})).dayIds[0];
   ok((await post('endDay',{dayId:endId})).status===400,'a matchday must be set up before it ends');
-  await success('setupDay',{dayId:endId,roster,a:'red',b:'black',firstExit:'red'});
+  await success('setupDay',{dayId:endId,a:'red',b:'black',firstExit:'red'});
   const endRound={dayId:endId,scoreA:1,scoreB:0,lineup:[owner.id,red.id,black.id],goals:[goal('red',owner.id)]};
   await success('addRound',endRound);
   ok((await post('endDay',{dayId:endId},'black-user')).status===403,'players cannot end a matchday');
@@ -270,7 +275,7 @@ try{
   ok((await post('resumeDay',{dayId:endId})).status===400,'only an ended matchday can be resumed');
   await success('addRound',{...endRound,lineup:[owner.id,white.id],goals:[],scoreA:0});
   await success('requestDayDeletion',{dayId:endId});
-  const laterId=(await success('addDays',{from:'2099-01-11',...slot})).dayIds[0];await success('setupDay',{dayId:laterId,roster,a:'red',b:'black',firstExit:'red'});
+  const laterId=(await success('addDays',{from:'2099-01-11',...slot})).dayIds[0];await success('setupDay',{dayId:laterId,a:'red',b:'black',firstExit:'red'});
   ok((await post('endDay',{dayId:laterId})).status===400,'a matchday cannot end before its date');await success('deleteDay',{dayId:laterId});
   ok((await post('editDay',{dayId:wednesday,date:'2026-09-13',...slot})).status===400,'edited date cannot clash');
   await success('editDay',{dayId:wednesday,date:'2026-09-17',start:'19:00',end:'20:00'});
@@ -295,7 +300,8 @@ try{
   // Ten-minute games of any score, and players arriving after the session starts.
   const lateDay=series.dayIds[1];
   ok((await post('addAttendee',{dayId:lateDay,playerId:white.id})).status===400,'late arrivals need a set-up matchday');
-  await success('setupDay',{dayId:lateDay,roster:[owner.id,black.id,white.id],a:'red',b:'black',firstExit:'red'});
+  await success('setupDay',{dayId:lateDay,a:'red',b:'black',firstExit:'red'});
+  for(const p of [red,signing])await success('removeAttendee',{dayId:lateDay,playerId:p.id});
   await success('addRound',{dayId:lateDay,scoreA:3,scoreB:1,lineup:[owner.id,black.id],goals:[goal('red',owner.id),goal('red',owner.id),goal('red',null),goal('black',black.id)]});
   ok((await post('addRound',{dayId:lateDay,scoreA:2,scoreB:1,lineup:[owner.id,white.id],goals:[goal('red',owner.id)]})).status===400,'goal entries must match the score');
   await success('addAttendee',{dayId:lateDay,playerId:red.id});
@@ -312,6 +318,41 @@ try{
   for(const r of [...lateRounds].reverse())await success('undoRound',{dayId:lateDay,roundId:r.id});
   await success('openPoll',{dayId:lateDay});
   ok((await post('addAttendee',{dayId:lateDay,playerId:signing.id})).status===400,'attendance locks once voting opens');
+  // Removing a player from attendance after the fact: they leave every lineup, unless they scored, assisted, kept goal or were their team's only player in a game.
+  const recountDay=series.dayIds[2];
+  ok((await post('removeAttendee',{dayId:recountDay,playerId:absent.id})).status===400,'attendance is changed only on a set-up matchday');
+  await success('setupDay',{dayId:recountDay,a:'red',b:'black',firstExit:'red'});
+  await success('addRound',{dayId:recountDay,scoreA:1,scoreB:0,lineup:[owner.id,red.id,black.id],goals:[goal('red',owner.id)],keepers:{black:black.id}});
+  await success('addRound',{dayId:recountDay,scoreA:0,scoreB:0,lineup:[owner.id,absent.id],goals:[]});
+  await success('openPoll',{dayId:recountDay});
+  for(const [p,why] of [[owner,'scored'],[black,'kept goal'],[absent,'was their team\'s only player in a game']])ok((await post('removeAttendee',{dayId:recountDay,playerId:p.id})).status===400,'a player who '+why+' that day stays attending');
+  await success('removeAttendee',{dayId:recountDay,playerId:red.id});
+  const recounted=(await get()).data.days.find(d=>d.id===recountDay);
+  ok(!recounted.roster.some(p=>p.id===red.id)&&JSON.stringify(recounted.rounds[0].lineup)===JSON.stringify([owner.id,black.id]),'a player removed after voting opens leaves attendance and every lineup');
+  ok((await get()).data.log.some(e=>e.action==='removeAttendee'&&e.dayId===recountDay&&e.player===red.id&&e.by===owner.id),'the removal is in the edit log');
+  // Fair play: admins choose the voters; each names one attending player, never themselves, and need not attend.
+  ok((await post('setFairPlayVoter',{playerId:absent.id,voter:true},'black-user')).status===403,'players cannot choose fair-play voters');
+  ok((await post('fairPlayVote',{dayId:recountDay,candidate:white.id},'absent-user')).status===403,'only fair-play voters cast a fair-play vote');
+  for(const p of [absent,red,black])await success('setFairPlayVoter',{playerId:p.id,voter:true});
+  ok((await post('setFairPlayVoter',{playerId:black.id,voter:true})).status===400,'a fair-play voter is added once');
+  ok((await post('setFairPlayVoter',{playerId:'missing',voter:true})).status===400,'a fair-play voter must be an active player');
+  ok(JSON.stringify((await get('black-user')).data.fairPlayVoters)===JSON.stringify([black.id])&&(await get()).data.fairPlayVoters.length===3,'players learn only whether they vote for fair play');
+  ok((await post('fairPlayVote',{dayId:recountDay,candidate:absent.id},'absent-user')).status===400,'a fair-play voter cannot pick themselves');
+  ok((await post('fairPlayVote',{dayId:recountDay,candidate:red.id},'absent-user')).status===400,'the fair-play pick must be attending');
+  ok((await post('fairPlayVote',{dayId:series.dayIds[4],candidate:white.id},'absent-user')).status===400,'fair-play voting follows the matchday vote');
+  await success('fairPlayVote',{dayId:recountDay,candidate:white.id},'red-user');
+  ok((await post('fairPlayVote',{dayId:recountDay,candidate:owner.id},'red-user')).status===409,'one fair-play vote per voter');
+  await success('fairPlayVote',{dayId:recountDay,candidate:white.id},'absent-user');
+  const fairRows=async(table,day)=>(await (await mf.getD1Database('DB')).prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE day=?`).bind(day).first('n'));
+  ok(await fairRows('fair_play_ballots',recountDay)===2&&await fairRows('fair_play_receipts',recountDay)===2&&await fairRows('ballots',recountDay)===0,'fair-play ballots are stored apart from player-of-the-day ballots');
+  let fair=(await get('absent-user')).data.polls[recountDay].fairPlay;
+  ok(fair.count===2&&fair.voted&&fair.tally.length===0,'only the fair-play count shows while voting is open');
+  await success('setFairPlayVoter',{playerId:absent.id,voter:false});
+  ok(!(await get()).data.fairPlayVoters.includes(absent.id),'an admin removes a fair-play voter');
+  await success('closePoll',{dayId:recountDay});
+  fair=(await get('black-user')).data.polls[recountDay].fairPlay;
+  ok(JSON.stringify(fair.tally)===JSON.stringify([{candidate:white.id,votes:2}]),'the fair-play tally shows once voting closes');
+  ok((await post('fairPlayVote',{dayId:recountDay,candidate:owner.id},'black-user')).status===400,'closed fair-play voting rejected');
   const stale=state.revision;
   ok((await post('editPlayer',{...fields,...red,name:'Wrong overwrite'},'owner',stale)).status===409,'stale updates rejected');
   state=(await get()).data;ok(!JSON.stringify(state).includes('userId')&&!JSON.stringify(state).includes('inviteHash'),'private identity and invitation hashes not disclosed');
@@ -457,7 +498,7 @@ try{
   const ranked=model.teamStats([{...played('t2',[]),rounds:[game('red','black',1,1),game('black','white',2,0)]}]);
   ok(model.tablePosition(ranked,'black')===1&&model.tablePosition(ranked,'red')===2&&model.tablePosition(ranked,'white')===3,'table position follows the ranking');
   ok(model.tablePosition(model.teamStats([{...played('t3',[]),rounds:[game('red','black',1,1)]}]),'black')===1&&model.tablePosition(model.teamStats([{...played('t3',[]),rounds:[game('red','black',1,1)]}]),'red')===1&&model.tablePosition(model.teamStats([]),'red')===null,'tied teams share a place; unplayed teams have none');
-  const t=model.teamStats(state.days),p=model.playerStats(state.players,state.days);
+  const mainDay=state.days.filter(d=>d.id===dayId),t=model.teamStats(mainDay),p=model.playerStats(state.players,mainDay);
   ok(t.find(x=>x.team==='red').wins===1&&t.find(x=>x.team==='black').wins===1,'team wins derived correctly');
   ok(p.find(x=>x.id===owner.id).goals===2&&p.find(x=>x.id===red.id).assists===1&&p.find(x=>x.id===red.id).played===1,'goals assists and selective appearances correct');
   // Free-tier guardrails: tiny R2 budgets that the steps below hit exactly.
@@ -490,7 +531,7 @@ try{
   const d1=await mf.getD1Database('DB'),rowsFor=async(table,day)=>(await d1.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE day=?`).bind(day).first('n'));
   const dayOf=async(id,user='owner')=>(await get(user)).data.days.find(d=>d.id===id);
   const editDay=series.dayIds[0];
-  await success('setupDay',{dayId:editDay,roster,a:'red',b:'black',firstExit:'red'});
+  await success('setupDay',{dayId:editDay,a:'red',b:'black',firstExit:'red'});
   await success('addRound',{dayId:editDay,scoreA:1,scoreB:0,lineup:[owner.id,black.id],goals:[goal('red',owner.id)]});
   await success('addRound',{dayId:editDay,scoreA:0,scoreB:1,lineup:[owner.id,white.id],goals:[goal('white',white.id)]});
   let edited=(await dayOf(editDay)).rounds;
@@ -516,7 +557,7 @@ try{
   ok(editLog.length===4&&editLog[0].by===owner.id&&editLog[0].roundId===edited[0].id&&editLog[0].before.scoreB===2&&editLog[0].after.scoreA===1&&editLog[0].date==='2026-09-13'&&Date.parse(editLog[0].at)<=Date.now(),'edits are logged newest first with who, when, before and after');
   ok(!('log' in (await get('absent-user')).data),'players never receive the edit log');
   // Voting and a clip on the played day, so deletion has something to clean up.
-  await success('openPoll',{dayId:editDay});await success('vote',{dayId:editDay,candidates:[owner.id,white.id]},'black-user');
+  await success('openPoll',{dayId:editDay});await success('vote',{dayId:editDay,candidates:[owner.id,white.id]},'black-user');await success('fairPlayVote',{dayId:editDay,candidate:owner.id},'black-user');
   const editClip=(await dayOf(editDay)).videoKey;
   ok(editClip&&await bucket.head(editClip)&&await rowsFor('ballots',editDay)===2&&await rowsFor('vote_receipts',editDay)===1,'played day has a ballot, a receipt and a clip');
   ok((await post('deleteDay',{dayId:editDay})).status===400,'a played matchday cannot be cancelled outright');
@@ -531,7 +572,7 @@ try{
   ok(!('deletion' in await dayOf(editDay,'absent-user')),'players never see deletion requests');
   const third=await success('approveDayDeletion',{dayId:editDay},'black-user');
   ok(!await dayOf(editDay)&&third.deleted===true,'a third admin approval deletes the matchday and says so');
-  ok(await rowsFor('ballots',editDay)===0&&await rowsFor('vote_receipts',editDay)===0,'deleting a matchday removes its ballots and receipts');
+  ok(await rowsFor('ballots',editDay)===0&&await rowsFor('vote_receipts',editDay)===0&&await rowsFor('fair_play_ballots',editDay)===0&&await rowsFor('fair_play_receipts',editDay)===0,'deleting a matchday removes its ballots and receipts, fair play included');
   ok(!await bucket.head(editClip),'deleting a matchday removes its clip from storage');
   const deletionLog=(await get()).data.log.filter(e=>e.dayId===editDay).map(e=>e.action);
   ok(JSON.stringify(deletionLog.slice(0,4))===JSON.stringify(['deleteDay','approveDayDeletion','approveDayDeletion','requestDayDeletion'])&&(await get()).data.log[0].date==='2026-09-13','deletion steps are logged and the log outlives the day');

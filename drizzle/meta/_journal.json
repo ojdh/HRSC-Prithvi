@@ -99,6 +99,13 @@
       "when": 1791693516933,
       "tag": "0013_push_subscriptions",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1792009651107,
+      "tag": "0014_fair_play_votes",
+      "breakpoints": true
     }
   ]
 }
