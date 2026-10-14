@@ -317,7 +317,8 @@ try{
   ok(lateRounds[0].scoreA===3&&lateRounds[1].a==='red'&&lateRounds[1].b==='white'&&lateRounds[1].scoreB===2&&lateRounds[1].exit==='red','any score allowed and a draw sends the longest-on team off');
   for(const r of [...lateRounds].reverse())await success('undoRound',{dayId:lateDay,roundId:r.id});
   await success('openPoll',{dayId:lateDay});
-  ok((await post('addAttendee',{dayId:lateDay,playerId:signing.id})).status===400,'attendance locks once voting opens');
+  await success('addAttendee',{dayId:lateDay,playerId:signing.id});
+  ok((await get()).data.days.find(d=>d.id===lateDay).roster.some(p=>p.id===signing.id)&&(await get()).data.log.some(e=>e.action==='addAttendee'&&e.dayId===lateDay&&e.player===signing.id),'an admin adds a player after voting opens, and the edit log records it');
   // Removing a player from attendance after the fact: they leave every lineup, unless they scored, assisted, kept goal or were their team's only player in a game.
   const recountDay=series.dayIds[2];
   ok((await post('removeAttendee',{dayId:recountDay,playerId:absent.id})).status===400,'attendance is changed only on a set-up matchday');
@@ -353,6 +354,11 @@ try{
   fair=(await get('black-user')).data.polls[recountDay].fairPlay;
   ok(JSON.stringify(fair.tally)===JSON.stringify([{candidate:white.id,votes:2}]),'the fair-play tally shows once voting closes');
   ok((await post('fairPlayVote',{dayId:recountDay,candidate:owner.id},'black-user')).status===400,'closed fair-play voting rejected');
+  // A player missed from a closed matchday is added back and put into the game they played.
+  await success('addAttendee',{dayId:recountDay,playerId:red.id});
+  const missed=(await get()).data.days.find(d=>d.id===recountDay).rounds[0];
+  await success('editRound',{dayId:recountDay,roundId:missed.id,scoreA:missed.scoreA,scoreB:missed.scoreB,goals:missed.goals,keepers:missed.keepers,lineup:[...missed.lineup,red.id]});
+  ok((await get()).data.days.find(d=>d.id===recountDay).rounds[0].lineup.includes(red.id),'a player added after voting closes can be put into a played game');
   const stale=state.revision;
   ok((await post('editPlayer',{...fields,...red,name:'Wrong overwrite'},'owner',stale)).status===409,'stale updates rejected');
   state=(await get()).data;ok(!JSON.stringify(state).includes('userId')&&!JSON.stringify(state).includes('inviteHash'),'private identity and invitation hashes not disclosed');

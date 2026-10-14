@@ -147,8 +147,10 @@ export async function POST(req:Request){try{
       Object.assign(day,{roster,opening:[input.a,input.b],firstExit:input.firstExit});
     }else if(action==='addAttendee'){
       const input=z.object({dayId:id,playerId:id}).parse(body);const day=club.days.find(d=>d.id===input.dayId);check(day,'Match day not found.');
-      check(isReady(day),'Set up the matchday before adding late arrivals.');check(day.poll==='ready','Attendance is locked once voting opens.');
+      // Like removal, this works at any time, so a player missed from a played day can be added and then put into its games with Edit.
+      check(isReady(day),'Set up the matchday before adding late arrivals.');
       check(!day.roster.some(r=>r.id===input.playerId),'This player is already marked as attending.');day.roster.push(attendee(club,input.playerId));
+      record(club,actor(me),'addAttendee',day,{player:input.playerId});
     }else if(action==='removeAttendee'){
       const input=z.object({dayId:id,playerId:id}).parse(body);const day=club.days.find(d=>d.id===input.dayId);check(day,'Match day not found.');
       check(isReady(day),'Set up the matchday before changing attendance.');

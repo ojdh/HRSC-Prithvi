@@ -314,7 +314,7 @@ function ManageDay({data,day,today,busy,action,confirm,onModal,onShare,onDeleted
     {day.poll==='ready'&&!isReady(day)&&<p className="help">Set up attendance and opening teams before opening the vote.</p>}
     {day.poll==='ready'&&isReady(day)&&day.date>today&&<p className="help">Voting opens on the match day.</p>}
     {day.poll==='open'&&<p className="tiny-label">{data.polls[day.id]?.count??0} / {day.roster.length} votes received{data.fairPlayVoters.length>0&&` · ${data.polls[day.id]?.fairPlay.count??0} / ${data.fairPlayVoters.length} fair play`}</p>}
-    {day.poll==='ready'&&isReady(day)&&<LateArrival key={day.id} day={day} players={data.players} busy={busy} action={action}/>}
+    {isReady(day)&&<LateArrival key={day.id} day={day} players={data.players} busy={busy} action={action}/>}
     {isReady(day)&&<details className="manage-more"><summary>Attendance · {day.roster.length} attending</summary><DayAttendance day={day} players={data.players} busy={busy} action={action} confirm={confirm}/></details>}
     <details className="manage-more"><summary>{isPlayed(day)?'Edit log and deletion':'Edit log'}</summary>
       <EditLog entries={(data.log??[]).filter(e=>'dayId' in e&&e.dayId===day.id)} players={data.players}/>
@@ -325,7 +325,7 @@ function ManageDay({data,day,today,busy,action,confirm,onModal,onShare,onDeleted
 // Who attended a set-up matchday, by team. Admins remove anyone who did not come, even after voting opens or games are saved.
 function DayAttendance({day,players,busy,action,confirm}:{day:Day;players:Player[];busy:boolean;action:Action;confirm:Confirm}){const teamInfo=useContext(TeamsCtx);
   return <>{TEAMS.map(t=><div key={t}><h3 className="manage-subhead team-name" style={teamVars(teamInfo[t])}>{teamInfo[t].name} · {day.roster.filter(r=>r.team===t).length}</h3>{day.roster.filter(r=>r.team===t).map(r=>{const p=players.find(x=>x.id===r.id),name=p?.name??'Former player';
-    return <div className="roster-row" key={r.id}><Avatar p={p}/><div className="roster-name"><strong>{name}</strong></div><button className="secondary-btn remove-btn" disabled={busy} onClick={()=>confirm({title:`Remove ${name} from attendance?`,description:(isPlayed(day)?'They are taken out of this day’s games and no longer count as attending. A vote they already cast stays counted.':'They will not be able to vote on this matchday.')+(day.poll==='ready'?' Add them back as a late arrival if they turn up.':''),action:async()=>{if(await action('removeAttendee',{dayId:day.id,playerId:r.id}))toast.success(name+' removed from attendance.')}})}><UserMinus size={14}/>Remove</button></div>})}</div>)}</>
+    return <div className="roster-row" key={r.id}><Avatar p={p}/><div className="roster-name"><strong>{name}</strong></div><button className="secondary-btn remove-btn" disabled={busy} onClick={()=>confirm({title:`Remove ${name} from attendance?`,description:(isPlayed(day)?'They are taken out of this day’s games and no longer count as attending. A vote they already cast stays counted.':'They will not be able to vote on this matchday.')+' Add them back as a late arrival if this was a mistake.',action:async()=>{if(await action('removeAttendee',{dayId:day.id,playerId:r.id}))toast.success(name+' removed from attendance.')}})}><UserMinus size={14}/>Remove</button></div>})}</div>)}</>
 }
 type PlayerLine=ReturnType<typeof playerStats>[number];
 function Leaders({players,kind='goals'}:{players:PlayerLine[];kind?:'goals'|'assists'|'wins'|'attended'}){const teamInfo=useContext(TeamsCtx),open=useContext(LinksCtx);const ranked=[...players].sort((a,b)=>b[kind]-a[kind]).filter(p=>p[kind]>0).slice(0,5);return ranked.length?<div>{ranked.map((p,i)=><button className="leader-row w-full text-left" key={p.id} onClick={()=>open.player(p.id)}><span className="tiny-label w-4">{i+1}</span><Avatar p={p}/><div className="grow"><strong>{p.name}</strong><small>{teamInfo[p.team].name} · {p.position}</small></div><span className="leader-value">{p[kind]}</span></button>)}</div>:<NoData title="No stats yet">The leaderboard fills in as match results are added.</NoData>}
@@ -438,7 +438,7 @@ function ClubAdmin({data,busy,action,confirm,onNewMatchday,onExport,onToggleAdmi
     <ScoreBreakdown data={data}/>
     <section><div className="section-title"><h2>Admin chat</h2></div><ChatPanel data={data} room={ADMIN_CHAT} confirm={confirm}/></section>
     <UndoRound data={data} busy={busy} action={action} confirm={confirm}/>
-    <section className="panel"><div className="panel-head"><h2>Edit log</h2><History size={22}/></div><p className="subtle">Every corrected or undone game, every player removed from attendance, every matchday deletion and every board post or comment an admin removed, newest first.</p><EditLog entries={data.log??[]} players={data.players} showDay/></section>
+    <section className="panel"><div className="panel-head"><h2>Edit log</h2><History size={22}/></div><p className="subtle">Every corrected or undone game, every player added to or removed from attendance, every matchday deletion and every board post or comment an admin removed, newest first.</p><EditLog entries={data.log??[]} players={data.players} showDay/></section>
   </div>
 }
 const POSITION_LABELS:Record<ScoringPosition,string>={Goalkeeper:'Goalkeepers',Defender:'Defenders',Midfielder:'Midfielders',Forward:'Forwards'};
@@ -562,7 +562,7 @@ function DayDeletion({day,data,busy,action,confirm,onDeleted}:{day:Day;data:Publ
     </>}
   </section>
 }
-const LOG_LABELS:Record<LogAction,string>={editRound:'Corrected a game',undoRound:'Undid a game',removeAttendee:'Removed from attendance',requestDayDeletion:'Asked to delete the matchday',approveDayDeletion:'Approved deleting the matchday',cancelDayDeletion:'Withdrew the deletion request',deleteDay:'Matchday deleted',removePost:'Removed a board post',removeComment:'Removed a board comment',removeMessage:'Removed a chat message'};
+const LOG_LABELS:Record<LogAction,string>={editRound:'Corrected a game',undoRound:'Undid a game',addAttendee:'Added to attendance',removeAttendee:'Removed from attendance',requestDayDeletion:'Asked to delete the matchday',approveDayDeletion:'Approved deleting the matchday',cancelDayDeletion:'Withdrew the deletion request',deleteDay:'Matchday deleted',removePost:'Removed a board post',removeComment:'Removed a board comment',removeMessage:'Removed a chat message'};
 const LOGGED_AT=new Intl.DateTimeFormat('en-CA',{dateStyle:'medium',timeStyle:'short',timeZone:'America/Edmonton'});
 function EditLog({entries,players,showDay=false}:{entries:LogEntry[];players:Player[];showDay?:boolean}){
   const teamInfo=useContext(TeamsCtx);const name=(pid:string,missing='A former admin')=>players.find(p=>p.id===pid)?.name??missing;
@@ -592,9 +592,9 @@ function loadDraft(key:string):GameDraft|null{try{const saved=localStorage.getIt
 function storeDraft(key:string,draft:GameDraft){try{localStorage.setItem(key,JSON.stringify(draft))}catch{/* storage unavailable: the draft stays in memory */}}
 function forgetDraft(key:string){try{localStorage.removeItem(key)}catch{/* storage unavailable: nothing was saved */}}
 function LateArrival({day,players,busy,action}:{day:Day;players:Player[];busy:boolean;action:Action}){
-  const [playerId,setPlayerId]=useState('');const absent=players.filter(p=>p.active!==false&&!day.roster.some(r=>r.id===p.id));
+  const [playerId,setPlayerId]=useState(''),label=isPlayed(day)?'Add a missed player':'Late arrival';const absent=players.filter(p=>p.active!==false&&!day.roster.some(r=>r.id===p.id));
   if(!absent.length)return null;
-  return <div className="action-row mt-4"><label className="field">Late arrival<Picker label="Late arrival" value={playerId} onChange={setPlayerId} options={absent.map(p=>({value:p.id,label:p.name}))}/></label><button className="secondary-btn" disabled={busy||!playerId} onClick={async()=>{const name=absent.find(p=>p.id===playerId)?.name;if(await action('addAttendee',{dayId:day.id,playerId})){setPlayerId('');toast.success(name+' added to attendance.')}}}><UserRoundCheck size={14}/>Add late arrival</button></div>
+  return <div className="action-row mt-4"><label className="field">{label}<Picker label={label} value={playerId} onChange={setPlayerId} options={absent.map(p=>({value:p.id,label:p.name}))}/></label><button className="secondary-btn" disabled={busy||!playerId} onClick={async()=>{const name=absent.find(p=>p.id===playerId)?.name;if(await action('addAttendee',{dayId:day.id,playerId})){setPlayerId('');toast.success(name+' added to attendance.'+(day.rounds.length?' Put them into their games with Edit under Results.':''))}}}><UserRoundCheck size={14}/>{isPlayed(day)?'Add to attendance':'Add late arrival'}</button></div>
 }
 function RoundVideo({day,round,admin,busy,action}:{day:Day;round:Round;admin:boolean;busy:boolean;action:Action}){
   const [url,setUrl]=useState(round.videoUrl||'');useEffect(()=>setUrl(round.videoUrl||''),[round.id,round.videoUrl]);
