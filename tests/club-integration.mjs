@@ -383,6 +383,17 @@ try{
   const ts=require('typescript');
   async function libModule(file,deps={}){let js=ts.transpileModule(await readFile(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.ES2022,target:ts.ScriptTarget.ES2022}}).outputText;for(const [name,url] of Object.entries(deps))js=js.replaceAll(`from '${name}'`,`from '${url}'`);const url='data:text/javascript;base64,'+Buffer.from(js).toString('base64');return {url,module:await import(url)}}
   const club=await libModule('lib/club.ts'),model=club.module;
+  // Scoring position and tier: set by admins only and never sent to players; players see only the combined scores.
+  ok((await post('setScoring',{playerId:black.id,tier:1,scoringPosition:'Forward'},'black-user')).status===403,'players cannot set scoring');
+  for(const bad of [{tier:6},{tier:0},{scoringPosition:'All-rounder'},{playerId:'missing'}])ok((await post('setScoring',{playerId:black.id,tier:1,scoringPosition:'Forward',...bad})).status===400,'invalid scoring rejected: '+JSON.stringify(bad));
+  await success('setScoring',{playerId:black.id,tier:1,scoringPosition:'Forward'});
+  const adminView=(await get()).data,playerView=(await get('black-user')).data;
+  ok(adminView.players.find(p=>p.id===black.id).tier===1&&adminView.players.find(p=>p.id===black.id).scoringPosition==='Forward','admins see each player\'s scoring');
+  ok(playerView.players.every(p=>!('tier' in p)&&!('scoringPosition' in p)),'players never receive tiers or scoring positions');
+  ok(playerView.polls[dayId].tally.length===0&&adminView.polls[dayId].tally.length>0,'only admins receive the vote tally');
+  const mainScores=model.dayScores(adminView.days.find(d=>d.id===dayId),adminView.players,adminView.polls[dayId].tally).map(s=>({candidate:s.id,score:Math.round(s.score*10)/10}));
+  ok(mainScores.length===4&&JSON.stringify(playerView.polls[dayId].scores)===JSON.stringify(mainScores),'everyone receives the combined scores, rounded to one decimal');
+  ok(!('scores' in (await get('black-user')).data.polls[(await get()).data.days.find(d=>d.poll==='open').id]),'combined scores appear only once voting closes');
   // URL routing: every address parses to one page state and builds back to the same address.
   const routes=(await libModule('lib/routes.ts',{'./club':club.url})).module;
   const parsed=search=>JSON.stringify(routes.parseRoute(search));
@@ -460,6 +471,21 @@ try{
   const squad=[{id:'r1',team:'red'},{id:'w1',team:'white'}];
   ok(JSON.stringify(model.teamsWithout(squad.map(p=>p.id),squad))==='["black"]'&&JSON.stringify(model.teamsWithout(['r1'],squad))==='["black","white"]'&&model.teamsWithout(['r1','w1','b1'],[...squad,{id:'b1',team:'black'}]).length===0,'matchday setup names the teams with nobody attending');
   // League table: 3 points a win, 1 a draw; GF, GA and GD add up over every game played.
+  // Combined score: stat points (goals and assists valued by scoring position and tier, 1 per game, and a keeper's or
+  // defender's base minus 2 per goal conceded in their games) and votes, each normalised by the day's highest, worth 50 each.
+  const scorer=(id,team,extra)=>({id,name:id,team,height:null,position:'Midfielder',photo:null,active:true,...extra});
+  const scoringSquad=[scorer('k','red',{tier:5,scoringPosition:'Goalkeeper'}),scorer('m','red',{position:'All-rounder'}),scorer('d','black',{tier:4,scoringPosition:'Defender'}),scorer('f','black',{tier:1,scoringPosition:'Forward'}),scorer('x','white',{tier:2,scoringPosition:'Forward'})];
+  const goalBy=(team,scorer,assist=null,ownGoal=false)=>({team,scorer,assist,ownGoal});
+  const scoredDay={...played('s',[{id:'k',team:'red'},{id:'m',team:'red'},{id:'d',team:'black'},{id:'f',team:'black'}]),rounds:[
+    {id:'r1',a:'red',b:'black',scoreA:2,scoreB:1,lineup:['k','m','d','f'],goals:[goalBy('red','m','k'),goalBy('red','d',null,true),goalBy('black','f','d')],exit:'black',winner:'red'},
+    {id:'r2',a:'red',b:'black',scoreA:0,scoreB:3,lineup:['m','d','f'],goals:[goalBy('black','d','f'),goalBy('black','d'),goalBy('black','f')],exit:'red',winner:'black'}]};
+  const scored=model.dayScores(scoredDay,scoringSquad,[{candidate:'f',votes:4},{candidate:'k',votes:2},{candidate:'d',votes:1}]),line=id=>scored.find(s=>s.id===id);
+  ok(line('k').points===29&&line('m').points===11&&line('d').points===47&&line('f').points===16,'stat points follow tier, scoring position, games and goals conceded in the games played');
+  ok(line('d').goals===2&&line('d').conceded===2&&line('m').conceded===4,'own goals earn no points but count as conceded');
+  ok(JSON.stringify(scored.map(s=>s.id))==='["f","d","k","m"]'&&Math.abs(line('f').score-(50*16/47+50))<1e-9&&line('d').score===62.5&&!scored.some(s=>s.id==='x'),'votes and stats are each normalised by the day\'s highest and worth 50; only attending players are scored');
+  ok(JSON.stringify(model.bestPlayers(scored.map(s=>({candidate:s.id,score:Math.round(s.score*10)/10}))).map(s=>s.candidate))==='["f"]'&&model.bestPlayers([{candidate:'a',score:0}]).length===0,'the best player has the top combined score; nobody wins on zero');
+  const leaky={...played('l',[{id:'k',team:'red'},{id:'f',team:'black'}]),rounds:[{id:'r',a:'red',b:'black',scoreA:0,scoreB:11,lineup:['k','f'],goals:Array(11).fill(goalBy('black',null)),exit:'red',winner:'black'}]};
+  ok(model.dayScores(leaky,scoringSquad,[]).find(s=>s.id==='k').points===-1,'the defensive score has no floor: 20 − 2 × 11 + 1 game');
   const game=(a,b,scoreA,scoreB)=>({id:a+b+scoreA+scoreB,a,b,scoreA,scoreB,goals:[],lineup:[],exit:a,winner:scoreA===scoreB?null:scoreA>scoreB?a:b});
   const table=model.teamStats([{...played('t1',[]),rounds:[game('red','black',1,0),game('black','white',0,0),game('white','black',0,0),game('black','red',0,0),game('red','white',0,3)]}]);
   const pts=Object.fromEntries(table.map(s=>[s.team,s]));

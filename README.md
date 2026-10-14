@@ -24,7 +24,23 @@ Live starts with Who's here? for the opening teams. The live board then shows th
 
 ## Voting
 
-One irreversible ballot per attending player, naming one player from each team, the voter's own included; nobody can vote for themselves. A team whose only attending player is the voter is skipped. The ballot screen groups candidates by team and shows each one's goals, assists and wins for the day and the season, and asks for confirmation before submitting. Personal invitations are random, single-use and tied to a preassigned roster record. Recopying an unclaimed invitation returns the same link. Tokens remain server-private; a protected cookie carries the invitation through sign-in. A D1 transactional batch enforces one receipt and its anonymous ballots, with revision checks protecting poll closure races. Participation and ballot choice are stored separately. Member-facing APIs never expose individual choices or identity keys. Aggregate results stay hidden until voting closes; tied leaders share the award. Small groups or infrastructure-level timing observations may still permit inference; this is not cryptographic anonymity.
+One irreversible ballot per attending player, naming one player from each team, the voter's own included; nobody can vote for themselves. A team whose only attending player is the voter is skipped. The ballot screen groups candidates by team and shows each one's goals, assists and wins for the day and the season, and asks for confirmation before submitting. Personal invitations are random, single-use and tied to a preassigned roster record. Recopying an unclaimed invitation returns the same link. Tokens remain server-private; a protected cookie carries the invitation through sign-in. A D1 transactional batch enforces one receipt and its anonymous ballots, with revision checks protecting poll closure races. Participation and ballot choice are stored separately. Member-facing APIs never expose individual choices or identity keys. Aggregate results stay hidden until voting closes.
+
+The player of the day is the attending player with the best combined score once voting closes; tied leaders share the award, and nobody wins on zero. The score is out of 100: half from votes (votes ÷ the day's most votes) and half from stat points (points ÷ the day's most points). Stat points are 1 per game played; per goal and per assist, the average of the player's scoring-position value and tier value; and, for goalkeepers and defenders, a base of 20 or 15 minus 2 per goal their team conceded in the games they played, which can go below zero. Own goals earn nobody points.
+
+| Scoring position | Goal | Assist | Defensive base |
+|---|---|---|---|
+| Goalkeeper | 15 | 10 | 20 |
+| Defender | 12 | 8 | 15 |
+| Midfielder | 8 | 5 | — |
+| Forward | 5 | 4 | — |
+
+| Tier | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|
+| Goal | 5 | 7 | 10 | 13 | 15 |
+| Assist | 4 | 5 | 7 | 10 | 10 |
+
+Tier 1 is the strongest group, so its goals are worth least. Admins set each player's scoring position and tier under Me → Club admin → Player scoring; a player without one counts as tier 3 at their profile position, with an all-rounder counted as a midfielder. Changes apply to every closed matchday's scores. Players see only the combined scores; tiers, scoring positions, the vote tally and stat points reach admins only, who see each closed day's breakdown under Club admin → Score breakdown. The logic is `dayScores` in `lib/club.ts`. Small groups or infrastructure-level timing observations may still permit inference; this is not cryptographic anonymity.
 
 The fair play award has its own voters, chosen by any admin under Me → Club admin. A fair-play voter need not have attended. After their player-of-the-day ballot (or straight away, if they did not attend) they see a second screen and name one attending player, never themselves. It opens and closes with the matchday's vote, is stored the same way in its own tables (`fair_play_receipts` and `fair_play_ballots`, migration `0014`), and its tally and winner appear once voting closes. Non-admins learn only whether they are a fair-play voter themselves.
 
@@ -103,7 +119,7 @@ Football photograph: Emilio Garcia, https://unsplash.com/photos/man-playing-socc
 
 ## Navigation and admin
 
-The app has five tabs for everyone: Home, Matchdays, Table, Teams and Me. Home shows the next (or current) matchday with one button (Vote now, Follow it live, See results or See matchday), who took the last matchday and its player of the day, and the newest two posts on your team board (text only, so it reads no photos). Table keeps the team cards, the league table and the leaderboards. Me holds your profile, the Club guide and, for admins, Club admin: the admin list, the fair-play voters, new matchdays or weekly series, the stats export and the full edit log. Admin controls otherwise sit on the page they change: Manage on each matchday and on each team page.
+The app has five tabs for everyone: Home, Matchdays, Table, Teams and Me. Home shows the next (or current) matchday with one button (Vote now, Follow it live, See results or See matchday), who took the last matchday and its player of the day, and the newest two posts on your team board (text only, so it reads no photos). Table keeps the team cards, the league table and the leaderboards. Me holds your profile, the Club guide and, for admins, Club admin: the admin list, the fair-play voters, player scoring and score breakdowns, new matchdays or weekly series, the stats export and the full edit log. Admin controls otherwise sit on the page they change: Manage on each matchday and on each team page.
 
 The first organiser is the club owner. The owner can make any connected, active player an admin (up to 10) from their row under Manage on their team page, and remove that right again there or in Club admin; only the owner can do this, and the owner cannot be demoted. Removing a player from the roster also removes their admin right, and restoring them does not bring it back. Admins have every other organiser power.
 
