@@ -188,10 +188,18 @@ export function dayScores(day:Day,players:Player[],tally:{candidate:string;votes
     }
     const goal=(POSITION_POINTS[position].goal+TIER_POINTS[tier].goal)/2,assist=(POSITION_POINTS[position].assist+TIER_POINTS[tier].assist)/2,base=DEFENCE_BASE[position];
     const points=goals*goal+assists*assist+games*GAME_POINTS+(base===undefined?0:base-CONCEDED_PENALTY*conceded);
-    return {id:p.id,goals,assists,games,conceded,points,votes:tally.find(t=>t.candidate===p.id)?.votes??0};
+    return {id:p.id,goals,assists,games,conceded,concededCounts:base!==undefined,goalValue:goal,assistValue:assist,base,points,votes:tally.find(t=>t.candidate===p.id)?.votes??0};
   });
   const maxPoints=Math.max(0,...lines.map(l=>l.points)),maxVotes=Math.max(0,...lines.map(l=>l.votes));
-  return lines.map(l=>({...l,score:(maxPoints?50*l.points/maxPoints:0)+(maxVotes?50*l.votes/maxVotes:0)})).sort((a,b)=>b.score-a.score);
+  return lines.map(l=>{const statScore=maxPoints?50*l.points/maxPoints:0,voteScore=maxVotes?50*l.votes/maxVotes:0;return {...l,statScore,voteScore,score:statScore+voteScore}}).sort((a,b)=>b.score-a.score);
+}
+// A player's stat points as the working that reaches them: each count times its weight for the player's position and tier,
+// the game points, and for keepers and defenders the base minus the penalty per goal conceded.
+export function pointsFormula(line:Pick<ReturnType<typeof dayScores>[number],'goals'|'assists'|'games'|'goalValue'|'assistValue'|'base'|'conceded'|'points'>){
+  const count=(n:number,noun:string)=>n+' '+noun+(n===1?'':'s'),num=(n:number)=>String(Math.round(n*10)/10);
+  const terms=[count(line.goals,'goal')+' × '+num(line.goalValue),count(line.assists,'assist')+' × '+num(line.assistValue),count(line.games,'game')+' × '+GAME_POINTS];
+  if(line.base!==undefined)terms.push(line.base+' base − '+line.conceded+' conceded × '+CONCEDED_PENALTY);
+  return terms.join(' + ')+' = '+num(line.points);
 }
 // Player of the day: everyone tied on the highest combined score, if it is above zero. Scores arrive highest first.
 export function bestPlayers(scores:CombinedScore[]){const top=scores[0]?.score??0;return top>0?scores.filter(s=>s.score===top):[];}
