@@ -1,3 +1,4 @@
+import { youtubeId } from './links';
 export const TEAMS = ['red','black','white'] as const;
 export type Team = typeof TEAMS[number];
 // captain is the id of an active player on that team.
@@ -208,9 +209,7 @@ export function awardWinners(tally:{candidate:string;votes:number}[]){const max=
 export function timeLabel(day:Day){return clockLabel(day.start)+'–'+clockLabel(day.end);}
 export const VIDEO_HOSTS=['youtube.com','www.youtube.com','youtu.be','vimeo.com','www.vimeo.com','drive.google.com'];
 export function isVideoUrl(url:string){try{const u=new URL(url);return u.protocol==='https:'&&VIDEO_HOSTS.includes(u.hostname);}catch{return false;}}
-export function embedVideo(url:string){try{const u=new URL(url);if(['youtube.com','www.youtube.com'].includes(u.hostname)){
-  const id=u.searchParams.get('v')||u.pathname.match(/^\/shorts\/([\w-]+)/)?.[1];return id&&/^[\w-]{6,20}$/.test(id)?'https://www.youtube-nocookie.com/embed/'+id:null;}
-  if(u.hostname==='youtu.be'&&/^[\w-]{6,20}$/.test(u.pathname.slice(1)))return 'https://www.youtube-nocookie.com/embed/'+u.pathname.slice(1);
+export function embedVideo(url:string){try{const u=new URL(url),youtube=youtubeId(url);if(youtube)return 'https://www.youtube-nocookie.com/embed/'+youtube;
   if(['vimeo.com','www.vimeo.com'].includes(u.hostname)&&/^\d+$/.test(u.pathname.slice(1)))return 'https://player.vimeo.com/video/'+u.pathname.slice(1);
   return null;}catch{return null;}}
 function clockLabel(time:string){const [h,m]=time.split(':').map(Number);return (h%12||12)+':'+String(m).padStart(2,'0')+(h<12?' AM':' PM');}

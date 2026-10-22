@@ -15,6 +15,7 @@ import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
 import Cropper from 'react-easy-crop';
 import { compressPhoto,cropPhoto,type CropArea } from '@/lib/photo-compression';
+import { splitLinks,youtubeIds } from '@/lib/links';
 import { parseRoute,routeSearch,normalizeRoute,type Route,type View } from '@/lib/routes';
 import { FORMATION_LIMITS,LONG_PRESS,PITCH,PITCH_MARKINGS,RUN_KINDS,addSlot,aimStart,canAdd,clearRuns,hasRuns,initials,nudge,pointerSpot,pressIntent,removeSlot,runArrow,setRun,shareFileName,unplaced,type Formation,type FormationSlot,type PitchPoint,type RunKind } from '@/lib/formation';
 import { formationImage } from './formation-image';
@@ -407,7 +408,7 @@ function BoardPreview({data,team,onOpen}:{data:PublicClub;team:Team;onOpen:()=>v
   return <div className="panel"><div className="panel-head"><h2>{teamInfo[team].name} board</h2><MessagesSquare size={20}/></div>
     <BoardComposer key={team} home onPost={post}/>
     {failed?<p className="help">{failed}</p>:posts===null?<p className="help">Loading the board…</p>:!posts.length?<p className="help">Nothing posted yet.</p>
-      :posts.map(post=><div className="board-preview-post" key={post.id}><Avatar p={data.players.find(p=>p.id===post.author)}/><div><strong><PlayerLink id={post.author} players={data.players} fallback="Former player"/></strong> <small>{postedAgo(post.createdAt)}</small><p>{post.body}</p></div></div>)}
+      :posts.map(post=><div className="board-preview-post" key={post.id}><Avatar p={data.players.find(p=>p.id===post.author)}/><div><strong><PlayerLink id={post.author} players={data.players} fallback="Former player"/></strong> <small>{postedAgo(post.createdAt)}</small><p><LinkedParts text={post.body}/></p></div></div>)}
     <button className="text-btn mt-3" onClick={onOpen}>Open the board<ArrowRight size={14}/></button></div>
 }
 const CHAT_PREVIEW_MESSAGES=3;
@@ -662,12 +663,12 @@ function TeamBoard({data,team,confirm}:{data:PublicClub;team:Team;confirm:Confir
       :!posts.length?<div className="panel"><NoData title="Nothing posted yet">Start the conversation: share a plan, a photo or a shout-out.</NoData></div>
       :<div className="board-feed">{posts.map(post=>{const writer=author(post.author);return <article className="panel board-post" key={post.id}>
         <header className="board-head"><Avatar p={writer}/><div><strong><PlayerLink id={post.author} players={data.players} fallback="Former player"/></strong><small>{postedAgo(post.createdAt)}</small></div>{(post.author===data.me||data.isAdmin)&&<button type="button" className="text-btn remove-btn" aria-label="Delete post" onClick={()=>remove('post',post.id,post.author)}><Trash2 size={16}/></button>}</header>
-        <p className="board-text">{post.body}</p>
+        <LinkedText text={post.body}/>
         {post.images.length>0&&<div className="board-photos" data-count={post.images.length}>{post.images.map(key=><button type="button" key={key} onClick={()=>setViewing(key)} aria-label="Open photo full size"><img src={boardImage(key)} loading="lazy" alt="Shared on the team board"/></button>)}</div>}
         <ReactionBar reactions={post.reactions} me={data.me} players={data.players} onReact={emoji=>react(post.id,emoji)}/>
         <div className="board-comments">{post.comments.map(c=>{const commenter=author(c.author);return <div className="board-comment" key={c.id}><Avatar p={commenter}/><div className="board-comment-body">
           <div className="board-comment-head"><strong><PlayerLink id={c.author} players={data.players} fallback="Former player"/></strong><small>{postedAgo(c.createdAt)}</small>{(c.author===data.me||data.isAdmin)&&<button type="button" className="text-btn remove-btn" aria-label="Delete comment" onClick={()=>remove('comment',c.id,c.author)}><Trash2 size={14}/></button>}</div>
-          <p className="board-text">{c.body}</p>
+          <LinkedText text={c.body}/>
           {c.image&&<button type="button" className="board-comment-photo" onClick={()=>setViewing(c.image!)} aria-label="Open photo full size"><img src={boardImage(c.image)} loading="lazy" alt="Shared in a comment"/></button>}
           <ReactionBar reactions={c.reactions} me={data.me} players={data.players} onReact={emoji=>react(c.id,emoji)}/>
         </div></div>})}
@@ -769,8 +770,14 @@ function ChatBubble({message:m,data,onDelete}:{message:ChatMessage;data:PublicCl
   const mine=m.author===data.me;
   return <div className={'chat-message'+(mine?' is-mine':'')}>{!mine&&<Avatar p={data.players.find(p=>p.id===m.author)}/>}<div className="chat-bubble">
     <div className="chat-meta">{!mine&&<strong><PlayerLink id={m.author} players={data.players} fallback="Former player"/></strong>}<small>{postedAgo(m.createdAt)}</small>{onDelete&&<button type="button" className="text-btn remove-btn" aria-label="Delete message" onClick={onDelete}><Trash2 size={14}/></button>}</div>
-    <p className="board-text">{m.body}</p></div></div>
+    <LinkedText text={m.body}/></div></div>
 }
+// Message or post text with its web links clickable, followed by a thumbnail for each YouTube video it links.
+function LinkedText({text}:{text:string}){
+  return <><p className="board-text"><LinkedParts text={text}/></p>
+    {youtubeIds(text).map(id=><a key={id} className="video-thumb" href={'https://www.youtube.com/watch?v='+id} target="_blank" rel="noopener noreferrer" aria-label="Watch the linked video on YouTube"><img src={'https://i.ytimg.com/vi/'+id+'/hqdefault.jpg'} alt="" loading="lazy" referrerPolicy="no-referrer"/><span className="video-play"><Play size={20}/></span></a>)}</>
+}
+function LinkedParts({text}:{text:string}){return <>{splitLinks(text).map((part,i)=>part.url?<a key={i} className="text-link" href={part.url} target="_blank" rel="noopener noreferrer nofollow">{part.text}</a>:part.text)}</>}
 // Writes a chat message: Enter sends, Shift+Enter starts a new line.
 function ChatComposer({to,onSend,onTyping}:{to:string;onSend:(body:string)=>Promise<boolean>;onTyping:()=>void}){
   const [body,setBody]=useState(''),[busy,setBusy]=useState(false);
