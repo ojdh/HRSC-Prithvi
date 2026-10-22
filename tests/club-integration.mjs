@@ -454,6 +454,14 @@ try{
   ok(parsed('?view=profile&tab=bogus&day=d1')===JSON.stringify({view:'profile'})&&parsed('?view=matchdays&tab=log')===JSON.stringify({view:'matchdays'})&&parsed('?view=standings&day=x&tab=log&team=red')===JSON.stringify({view:'standings'}),'parameters a page does not use are dropped');
   ok(parsed('?player=p9&invite_error=1')===JSON.stringify({view:'overview',player:'p9'}),'a player card opens over any page; other parameters are ignored');
   ok(model.embedVideo('https://youtu.be/dQw4w9WgXcQ')==='https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ'&&!model.isVideoUrl('http://youtube.com/x')&&model.isVideoUrl('https://vimeo.com/1')&&model.weeklyDates('2026-09-13','2026-11-29').length===12,'video links and weekly dates');
+  // Player of the season: each closed day's top three scores earn 3, 2 and 1 points; ties share a place, and a zero score earns nothing.
+  {const line=(candidate,score)=>({candidate,score,games:1,goals:0,assists:0,conceded:null,points:0,votes:0}),closed=id=>({id,poll:'closed'});
+  const season=model.playerOfTheSeason([closed('d1'),closed('d2'),closed('d3'),{id:'d4',poll:'open'}],{
+    d1:{scores:[line('ann',90),line('bo',60),line('cy',40),line('dee',10)]},
+    d2:{scores:[line('bo',80),line('ann',80),line('cy',30),line('dee',0)]},
+    d3:{scores:[line('ann',0),line('bo',0)]},
+    d4:{scores:[line('dee',100)]}});
+  ok(JSON.stringify(season)===JSON.stringify([{candidate:'ann',points:6,first:2,second:0,third:0},{candidate:'bo',points:5,first:1,second:1,third:0},{candidate:'cy',points:2,first:0,second:0,third:2}]),'player of the season adds 3, 2 and 1 points per closed matchday, ties sharing a place');}
   const played=(id,roster)=>({id,date:'2026-09-06',start:'07:00',end:'08:30',roster,opening:['red','black'],firstExit:'red',poll:'ready',rounds:[{id:'r',a:'red',b:'black',scoreA:0,scoreB:0,goals:[],lineup:[],exit:'red',winner:null}]});
   const [regular]=model.playerStats([{id:'p',name:'P',team:'red'}],[played('d1',[{id:'p',team:'red'}]),played('d2',[]),{...played('d3',[{id:'p',team:'red'}]),rounds:[]}]);
   ok(regular.attended===1&&regular.attendance===50,'attendance counts played matchdays only');
