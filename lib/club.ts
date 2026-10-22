@@ -208,6 +208,18 @@ export function pointsFormula(line:Pick<ReturnType<typeof dayScores>[number],'go
   if(line.base!==undefined)terms.push(line.base+' base − '+line.conceded+' conceded × '+CONCEDED_PENALTY);
   return terms.join(' + ')+' = '+num(line.points);
 }
+// Player of the season: on each closed day the top three combined scores earn 3, 2 and 1 points. Tied scores share a place,
+// so two joint winners both earn 3 and the next player is third. A score of zero earns nothing.
+export const SEASON_POINTS=[3,2,1] as const;
+export type SeasonLine = {candidate:string;points:number;first:number;second:number;third:number};
+export function playerOfTheSeason(days:Pick<Day,'id'|'poll'>[],polls:Record<string,{scores?:CombinedScore[]}>):SeasonLine[]{
+  const lines=new Map<string,SeasonLine>();
+  for(const day of days.filter(d=>d.poll==='closed')){const scores=polls[day.id]?.scores??[];
+    for(const s of scores){const place=scores.filter(x=>x.score>s.score).length;if(s.score<=0||place>=SEASON_POINTS.length)continue;
+      const line=lines.get(s.candidate)??{candidate:s.candidate,points:0,first:0,second:0,third:0};
+      line.points+=SEASON_POINTS[place];line[(['first','second','third'] as const)[place]]++;lines.set(s.candidate,line);}}
+  return [...lines.values()].sort((a,b)=>b.points-a.points||b.first-a.first||b.second-a.second||b.third-a.third);
+}
 // Player of the day: everyone tied on the highest combined score, if it is above zero. Scores arrive highest first.
 export function bestPlayers(scores:CombinedScore[]){const top=scores[0]?.score??0;return top>0?scores.filter(s=>s.score===top):[];}
 // The fair play award: everyone tied on the most votes. A closed poll's tally arrives sorted by votes, highest first.
