@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { z } from 'zod';
 import { getUser } from '../../auth';
-import { TEAMS,DEFAULT_TEAMS,TIERS,SCORING_POSITIONS,voteCandidates,dayScores,MAX_SERIES_DAYS,DELETION_APPROVALS,LOG_LIMIT,nextMatch,incumbentAt,result,snapshot,isPlayed,emptyClub,isReady,isVideoUrl,validDate,weeklyDates,clubToday,type Club,type Day,type Tier,type Team,type DayLogEntry,type Player } from '@/lib/club';
+import { TEAMS,DEFAULT_TEAMS,TIERS,SCORING_POSITIONS,voteCandidates,scoreLines,MAX_SERIES_DAYS,DELETION_APPROVALS,LOG_LIMIT,nextMatch,incumbentAt,result,snapshot,isPlayed,emptyClub,isReady,isVideoUrl,validDate,weeklyDates,clubToday,type Club,type Day,type Tier,type Team,type DayLogEntry,type Player } from '@/lib/club';
 import { db,readClub,saveClub,check,digest,token,role,ClubError } from '@/lib/server-club';
 import {pendingInvite,findInvitation,inviteCookie} from '@/lib/server-invitations';
 import {deleteObject} from '@/lib/r2-budget';
@@ -29,9 +29,9 @@ export async function GET(req:Request){try{
   const {club,revision}=stored;const {me,owner,admin}=role(club,user.userId);
   if(!me&&!owner)return response({...emptyClub,revision,initialized:true,invitation});
   const days=club.days.filter(d=>d.poll!=='ready'),[playerOfTheDay,fairPlay]=await Promise.all([pollResults('vote_receipts','ballots',days,me?.id),pollResults('fair_play_receipts','fair_play_ballots',days,me?.id)]);
-  // Players see only each closed day's combined scores; the tally behind them, like tiers and scoring positions, is for admins.
+  // Everyone sees each closed day's score lines; the raw tally, like tiers and scoring positions, is for admins.
   const polls=Object.fromEntries(days.map(d=>{const votes=playerOfTheDay[d.id];
-    return [d.id,{...votes,tally:admin?votes.tally:[],fairPlay:fairPlay[d.id],...(d.poll==='closed'?{scores:dayScores(d,club.players,votes.tally).map(s=>({candidate:s.id,score:Math.round(s.score*10)/10}))}:{})}];}));
+    return [d.id,{...votes,tally:admin?votes.tally:[],fairPlay:fairPlay[d.id],...(d.poll==='closed'?{scores:scoreLines(d,club.players,votes.tally)}:{})}];}));
   const fairPlayVoters=club.fairPlayVoters??[];
   return response({initialized:true,revision,isAdmin:admin,isOwner:owner,owner:club.players.find(p=>p.userId===club.adminId)?.id??null,admins:club.admins,fairPlayVoters:admin?fairPlayVoters:fairPlayVoters.filter(v=>v===me?.id),teams:club.teams,me:me?.id??null,players:club.players.map(({userId,inviteHash,legacyInviteHash,inviteToken,email,accessEmail,tier,scoringPosition,...p})=>({...p,linked:!!userId,...(admin?{email,accessEmail,tier,scoringPosition}:{})})),days:admin?club.days:club.days.map(({deletion,...d})=>d),polls,...(admin?{log:club.log??[]}:{})});
 }catch(e){return fail(e);}}
