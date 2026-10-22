@@ -58,9 +58,10 @@ export type ChatPage={version:number;refreshIn:number}&({unchanged:true}|{unchan
 // adminId is the owner's account: the only person who can grant or remove admin rights. admins and fairPlayVoters hold player ids.
 export type Club = {adminId:string;admins:string[];fairPlayVoters?:string[];teams:Record<Team,TeamInfo>;players:Player[];days:Day[];log?:LogEntry[]};
 // A vote's participation count, whether the visitor has voted, and the tally once voting closes, highest first.
-// Player-of-the-day tallies reach admins only; everyone gets that day's combined scores once voting closes.
+// Player-of-the-day tallies reach admins only; everyone gets that day's score lines once voting closes.
 export type PollResult = {count:number;voted:boolean;tally:{candidate:string;votes:number}[]};
-export type CombinedScore = {candidate:string;score:number};
+// One player's line for a closed day. conceded is null for players whose goals conceded don't count.
+export type CombinedScore = {candidate:string;score:number;games:number;goals:number;assists:number;conceded:number|null;points:number;votes:number};
 // fairPlayVoters is the whole list for admins, and for anyone else only themselves if they are one.
 export type PublicClub = {invitation?:{name:string;team:Team};players:Player[];days:Day[];revision:number;initialized:boolean;isAdmin:boolean;isOwner:boolean;owner:string|null;admins:string[];fairPlayVoters:string[];teams:Record<Team,TeamInfo>;me:string|null;log?:LogEntry[];polls:Record<string,PollResult&{fairPlay:PollResult;scores?:CombinedScore[]}>};
 export const emptyClub:PublicClub={players:[],days:[],revision:0,initialized:false,isAdmin:false,isOwner:false,owner:null,admins:[],fairPlayVoters:[],teams:DEFAULT_TEAMS,me:null,polls:{}};
@@ -193,6 +194,11 @@ export function dayScores(day:Day,players:Player[],tally:{candidate:string;votes
   });
   const maxPoints=Math.max(0,...lines.map(l=>l.points)),maxVotes=Math.max(0,...lines.map(l=>l.votes));
   return lines.map(l=>{const statScore=maxPoints?50*l.points/maxPoints:0,voteScore=maxVotes?50*l.votes/maxVotes:0;return {...l,statScore,voteScore,score:statScore+voteScore}}).sort((a,b)=>b.score-a.score);
+}
+// The score lines everyone sees for a closed day, highest first, with scores and stat points to one decimal. Tiers stay out.
+export function scoreLines(day:Day,players:Player[],tally:{candidate:string;votes:number}[]):CombinedScore[]{
+  const tenth=(n:number)=>Math.round(n*10)/10;
+  return dayScores(day,players,tally).map(l=>({candidate:l.id,score:tenth(l.score),games:l.games,goals:l.goals,assists:l.assists,conceded:l.concededCounts?l.conceded:null,points:tenth(l.points),votes:l.votes}));
 }
 // A player's stat points as the working that reaches them: each count times its weight for the player's position and tier,
 // the game points, and for keepers and defenders the base minus the penalty per goal conceded.

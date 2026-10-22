@@ -90,3 +90,6 @@ body{background:radial-gradient(ellipse at 95% 2%,#c5ead59c,transparent 45%),rad
 .chat-bubble{display:grid;gap:2px;min-width:0;padding:8px 12px;border-radius:14px 14px 14px 4px;background:var(--muted)}.chat-message.is-mine .chat-bubble{border-radius:14px 14px 4px 14px;background:var(--accent)}
 .chat-meta{display:flex;align-items:center;gap:8px;font-size:13px}.chat-meta small{color:var(--muted-foreground);font-size:12px}.chat-meta .text-btn{margin-left:auto}
 .chat-composer{display:flex;gap:8px;align-items:flex-end}.chat-composer textarea{flex:1;min-width:0;resize:none;min-height:44px;max-height:140px;padding:10px 12px;border-radius:var(--radius);border:1px solid var(--input);background:var(--card);color:var(--foreground);field-sizing:content}.chat-composer textarea:focus{outline:2px solid var(--ring);outline-offset:1px}
+
+.table-section>summary{cursor:pointer;list-style:none}.table-section>summary::-webkit-details-marker{display:none}.table-section-icon{flex:none;color:var(--muted-foreground);transition:transform .2s}.table-section[open] .table-section-icon{transform:rotate(90deg)}
+.table-section{margin-bottom:24px}

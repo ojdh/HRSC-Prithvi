@@ -389,7 +389,7 @@ try{
   const ts=require('typescript');
   async function libModule(file,deps={}){let js=ts.transpileModule(await readFile(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.ES2022,target:ts.ScriptTarget.ES2022}}).outputText;for(const [name,url] of Object.entries(deps))js=js.replaceAll(`from '${name}'`,`from '${url}'`);const url='data:text/javascript;base64,'+Buffer.from(js).toString('base64');return {url,module:await import(url)}}
   const links=await libModule('lib/links.ts'),club=await libModule('lib/club.ts',{'./links':links.url}),model=club.module;
-  // Scoring position and tier: set by admins only and never sent to players; players see only the combined scores.
+  // Scoring position and tier: set by admins only and never sent to players; players see each closed day's score lines.
   ok((await post('setScoring',{playerId:black.id,tier:1,scoringPosition:'Forward'},'black-user')).status===403,'players cannot set scoring');
   for(const bad of [{tier:6},{tier:0},{scoringPosition:'All-rounder'},{playerId:'missing'}])ok((await post('setScoring',{playerId:black.id,tier:1,scoringPosition:'Forward',...bad})).status===400,'invalid scoring rejected: '+JSON.stringify(bad));
   await success('setScoring',{playerId:black.id,tier:1,scoringPosition:'Forward'});
@@ -397,8 +397,8 @@ try{
   ok(adminView.players.find(p=>p.id===black.id).tier===1&&adminView.players.find(p=>p.id===black.id).scoringPosition==='Forward','admins see each player\'s scoring');
   ok(playerView.players.every(p=>!('tier' in p)&&!('scoringPosition' in p)),'players never receive tiers or scoring positions');
   ok(playerView.polls[dayId].tally.length===0&&adminView.polls[dayId].tally.length>0,'only admins receive the vote tally');
-  const mainScores=model.dayScores(adminView.days.find(d=>d.id===dayId),adminView.players,adminView.polls[dayId].tally).map(s=>({candidate:s.id,score:Math.round(s.score*10)/10}));
-  ok(mainScores.length===4&&JSON.stringify(playerView.polls[dayId].scores)===JSON.stringify(mainScores),'everyone receives the combined scores, rounded to one decimal');
+  const tenth=n=>Math.round(n*10)/10,mainScores=model.dayScores(adminView.days.find(d=>d.id===dayId),adminView.players,adminView.polls[dayId].tally).map(s=>({candidate:s.id,score:tenth(s.score),games:s.games,goals:s.goals,assists:s.assists,conceded:s.concededCounts?s.conceded:null,points:tenth(s.points),votes:s.votes}));
+  ok(mainScores.length===4&&JSON.stringify(playerView.polls[dayId].scores)===JSON.stringify(mainScores),'everyone receives each player\'s score line: games, goals, assists, conceded, stat points, votes and the combined score, rounded to one decimal');
   ok(!('scores' in (await get('black-user')).data.polls[(await get()).data.days.find(d=>d.poll==='open').id]),'combined scores appear only once voting closes');
   // URL routing: every address parses to one page state and builds back to the same address.
   const routes=(await libModule('lib/routes.ts',{'./club':club.url})).module;
