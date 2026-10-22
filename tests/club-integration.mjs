@@ -388,7 +388,7 @@ try{
   // lib modules load as data URLs, so a lib import of './club' is pointed at the loaded club module.
   const ts=require('typescript');
   async function libModule(file,deps={}){let js=ts.transpileModule(await readFile(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.ES2022,target:ts.ScriptTarget.ES2022}}).outputText;for(const [name,url] of Object.entries(deps))js=js.replaceAll(`from '${name}'`,`from '${url}'`);const url='data:text/javascript;base64,'+Buffer.from(js).toString('base64');return {url,module:await import(url)}}
-  const club=await libModule('lib/club.ts'),model=club.module;
+  const links=await libModule('lib/links.ts'),club=await libModule('lib/club.ts',{'./links':links.url}),model=club.module;
   // Scoring position and tier: set by admins only and never sent to players; players see only the combined scores.
   ok((await post('setScoring',{playerId:black.id,tier:1,scoringPosition:'Forward'},'black-user')).status===403,'players cannot set scoring');
   for(const bad of [{tier:6},{tier:0},{scoringPosition:'All-rounder'},{playerId:'missing'}])ok((await post('setScoring',{playerId:black.id,tier:1,scoringPosition:'Forward',...bad})).status===400,'invalid scoring rejected: '+JSON.stringify(bad));

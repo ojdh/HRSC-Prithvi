@@ -22,6 +22,7 @@ jobs:
       - run: node node_modules/typescript/bin/tsc --noEmit
       - run: node --test tests/r2-boundary.mjs
       - run: node --test tests/photo-compression.mjs
+      - run: node --test tests/links.mjs
       - run: pnpm build
       - run: node tests/club-integration.mjs
 

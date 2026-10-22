@@ -56,6 +56,8 @@ Each team has a private chat, the Chat section of its team page, open to the sam
 
 Admins and the owner also share an admin chat, under Me → Club admin and as a card on Home for admins. It works like a team chat across all three teams, except that everyone deletes only their own messages there. An admin who loses the role loses the admin chat. Its messages are stored with `team` set to `admins`.
 
+Web links in chat messages, board posts and comments are clickable and open in a new tab. Each YouTube video linked gets a thumbnail that opens it on YouTube; the image loads straight from YouTube (`i.ytimg.com`), so it costs no R2 operation.
+
 The chat has no push updates: it polls `/api/chat`, and each answer says how many seconds to wait before the next poll. That is 3 seconds when the last message was under 2 minutes ago, 10 under 10 minutes and 30 otherwise. A device polls at least every 3 seconds while its player is typing and stops while the page is hidden. Each poll sends the chat version it already has; while nothing has changed, the answer carries no messages and costs one D1 row read. Once a player has loaded older messages, each poll also sends the oldest one loaded; when the chat has changed, the answer holds every message from the newest down to it (up to 500), so messages deleted or expired anywhere on screen disappear. Messages live in the D1 tables `chat_messages` and `chat_state` (migration `0012`) and use no R2.
 
 ## Team formations
