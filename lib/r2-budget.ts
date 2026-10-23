@@ -62,8 +62,8 @@ export async function cleanupStorage() {
   }
   for (const team of Object.values(club.teams)) if (team.photo) referenced.add(team.photo);
   for (const day of club.days) if (day.videoKey) referenced.add(day.videoKey);
-  // Board photos are referenced from their own table rather than the club document.
-  const { results } = await db().prepare('SELECT key FROM r2_objects WHERE (created_at IS NULL OR created_at<unixepoch()-3600) AND key NOT IN (SELECT key FROM board_images)').all<{ key: string }>();
+  // Board and chat photos are referenced from their own tables rather than the club document.
+  const { results } = await db().prepare('SELECT key FROM r2_objects WHERE (created_at IS NULL OR created_at<unixepoch()-3600) AND key NOT IN (SELECT key FROM board_images) AND key NOT IN (SELECT image FROM chat_messages WHERE image IS NOT NULL)').all<{ key: string }>();
   const orphans = results.map(row => row.key).filter(key => !referenced.has(key));
   let removed = 0;
   for (const key of orphans) if (await deleteObject(key)) removed++;

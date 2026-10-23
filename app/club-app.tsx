@@ -1,5 +1,5 @@
 'use client';
-import { createContext,useCallback,useContext,useEffect,useState,useRef,type CSSProperties,type KeyboardEvent as ReactKeyboardEvent,type PointerEvent as ReactPointerEvent,type ReactNode } from 'react';
+import { createContext,useCallback,useContext,useEffect,useState,useRef,type CSSProperties,type ClipboardEvent as ReactClipboardEvent,type KeyboardEvent as ReactKeyboardEvent,type PointerEvent as ReactPointerEvent,type ReactNode } from 'react';
 import { CircleQuestionMark,Settings2,UserMinus,UserRoundCheck,MapPin,Sparkles,Activity,CalendarDays,Trophy,Users,UserRound,Vote,Shield,ArrowUpRight,ArrowRight,Plus,ChevronRight,House,Clock3,Check,Upload,Download,LogIn,LogOut,Link2,Undo2,Info,Target,Goal,Flag,Pencil,Loader2,CheckCircle2,Timer,Cake,Trash2,ZoomIn,History,MessagesSquare,MessageCircle,Bell,BellOff,ImagePlus,RefreshCw,Send,X,Shirt,Share2,Save,Eraser,ShieldCheck,CalendarCheck,Play,Crown,ArrowUp,ArrowDown,ArrowUpDown } from 'lucide-react';
 import { SidebarProvider,Sidebar,SidebarContent,SidebarHeader,SidebarFooter,SidebarMenu,SidebarMenuItem,SidebarMenuButton,SidebarTrigger,useSidebar } from '@/components/ui/sidebar';
 import { Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription } from '@/components/ui/dialog';
@@ -725,7 +725,10 @@ function BoardComposer({comment=false,home=false,onPost}:{comment?:boolean;home?
 }
 const CHAT_TYPING_REFRESH_S=3,CHAT_TYPING_WINDOW_MS=10_000;
 const chatCursor=(m:ChatMessage)=>m.createdAt+':'+m.id;
-async function chatRequest(body:Record<string,unknown>){const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json() as {error?:string};if(!r.ok)throw new Error(j.error||'The team chat could not be updated. Please try again.');return j}
+const chatImage=(key:string)=>'/api/chat/image?key='+encodeURIComponent(key);
+// A message with a photo goes as form data; everything else as JSON.
+async function chatRequest(body:Record<string,unknown>,photo?:File){const form=new FormData();if(photo){for(const [k,v] of Object.entries(body))form.append(k,String(v));form.append('image',photo)}
+  const r=await fetch('/api/chat',photo?{method:'POST',body:form}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json() as {error?:string};if(!r.ok)throw new Error(j.error||'The team chat could not be updated. Please try again.');return j}
 // A chat kept current by polling at the pace the server sets (refreshIn): at least every 3 seconds while
 // this person is typing, and not at all while the page is hidden. Used by the chat panels and Home's chat cards.
 function useChat(room:ChatRoom){
@@ -759,12 +762,12 @@ function useChat(room:ChatRoom){
     return ()=>{active.current=null;clearTimeout(timer.current);document.removeEventListener('visibilitychange',wake)};
   },[room,poll]);
   const typing=useCallback(()=>{const idle=Date.now()>=typingUntil.current;typingUntil.current=Date.now()+CHAT_TYPING_WINDOW_MS;if(idle)schedule(CHAT_TYPING_REFRESH_S,()=>void poll())},[poll,schedule]);
-  async function act(body:Record<string,unknown>,done?:string){try{await chatRequest(body);if(done)toast.success(done);await poll();return true}catch(e){toast.error((e as Error).message);return false}}
+  async function act(body:Record<string,unknown>,done?:string,photo?:File){try{await chatRequest(body,photo);if(done)toast.success(done);await poll();return true}catch(e){toast.error((e as Error).message);return false}}
   async function loadOlder(){if(!next)return;setLoadingOlder(true);try{const r=await fetch('/api/chat?team='+room+'&before='+encodeURIComponent(next),{cache:'no-store'});const j=await r.json() as ChatPage&{error?:string};if(!r.ok||j.unchanged)throw new Error(j.error||'Older messages could not load.');
     const oldest=j.messages.at(-1);if(oldest)since.current=chatCursor(oldest);
     setMessages(current=>[...(current??[]),...j.messages.filter(m=>!current?.some(c=>c.id===m.id))]);setNext(j.next)}catch(e){toast.error((e as Error).message)}finally{setLoadingOlder(false)}}
   return {messages,next,failed,loadingOlder,loadOlder,typing,
-    send:(body:string)=>act({action:'send',team:room,body}),
+    send:(body:string,photo?:File)=>act({action:'send',team:room,body},undefined,photo),
     remove:(messageId:string)=>act({action:'delete',messageId},'Message deleted.')};
 }
 // What each chat is called and who it is for: a team's own players, or the admins and the owner.
@@ -772,7 +775,7 @@ function useChatCopy(room:ChatRoom){const teamInfo=useContext(TeamsCtx);return r
 // A private, text-only chat: a team's, on its team page for its own players, where its admins can remove messages;
 // or the admin chat, in Club admin, where everyone removes only their own.
 function ChatPanel({data,room,confirm}:{data:PublicClub;room:ChatRoom;confirm:Confirm}){
-  const copy=useChatCopy(room),chat=useChat(room),log=useRef<HTMLDivElement>(null),atBottom=useRef(true);
+  const copy=useChatCopy(room),chat=useChat(room),log=useRef<HTMLDivElement>(null),atBottom=useRef(true),[viewing,setViewing]=useState('');
   const ordered=chat.messages&&[...chat.messages].reverse();
   // Follows new messages while the reader is at the bottom, and leaves the view alone while they read back.
   useEffect(()=>{const el=log.current;if(el&&atBottom.current)el.scrollTop=el.scrollHeight},[chat.messages]);
@@ -784,17 +787,20 @@ function ChatPanel({data,room,confirm}:{data:PublicClub;room:ChatRoom;confirm:Co
       {chat.next&&<button type="button" className="secondary-btn mx-auto flex" disabled={chat.loadingOlder} onClick={()=>void loadOlder()}>{chat.loadingOlder?'Loading…':'Load older messages'}</button>}
       {ordered===null?(!chat.failed&&<p className="help flex gap-2 items-center"><Loader2 className="animate-spin" size={16}/>Loading the chat…</p>)
         :!ordered.length?<NoData title="No messages yet">Say hello to {copy.to}.</NoData>
-        :ordered.map(m=><ChatBubble key={m.id} message={m} data={data} onDelete={m.author===data.me||data.isAdmin&&room!==ADMIN_CHAT?()=>remove(m):undefined}/>)}
+        :ordered.map(m=><ChatBubble key={m.id} message={m} data={data} onOpenPhoto={setViewing} onDelete={m.author===data.me||data.isAdmin&&room!==ADMIN_CHAT?()=>remove(m):undefined}/>)}
     </div>
     {chat.failed&&<p className="form-blocker" role="alert">{chat.failed}</p>}
     <ChatComposer key={room} to={copy.to} onSend={chat.send} onTyping={chat.typing}/>
+    <Dialog open={!!viewing} onOpenChange={v=>{if(!v)setViewing('')}}><DialogContent className="dialog-panel wide"><DialogHeader><DialogTitle>Photo</DialogTitle><DialogDescription>Shared in the {copy.name}.</DialogDescription></DialogHeader>{viewing&&<img className="board-full-photo" src={chatImage(viewing)} alt={'Shared in the '+copy.name+', full size'}/>}</DialogContent></Dialog>
   </div>
 }
-function ChatBubble({message:m,data,onDelete}:{message:ChatMessage;data:PublicClub;onDelete?:()=>void}){
+// Home's chat cards pass no onOpenPhoto: they say a photo was sent rather than loading it, since each view is an R2 read.
+function ChatBubble({message:m,data,onDelete,onOpenPhoto}:{message:ChatMessage;data:PublicClub;onDelete?:()=>void;onOpenPhoto?:(key:string)=>void}){
   const mine=m.author===data.me;
   return <div className={'chat-message'+(mine?' is-mine':'')}>{!mine&&<Avatar p={data.players.find(p=>p.id===m.author)}/>}<div className="chat-bubble">
     <div className="chat-meta">{!mine&&<strong><PlayerLink id={m.author} players={data.players} fallback="Former player"/></strong>}<small>{postedAgo(m.createdAt)}</small>{onDelete&&<button type="button" className="text-btn remove-btn" aria-label="Delete message" onClick={onDelete}><Trash2 size={14}/></button>}</div>
-    <LinkedText text={m.body}/></div></div>
+    {m.image&&(onOpenPhoto?<button type="button" className="board-comment-photo" onClick={()=>onOpenPhoto(m.image!)} aria-label="Open photo full size"><img src={chatImage(m.image)} loading="lazy" alt="Shared in the chat"/></button>:<p className="chat-photo-note"><ImagePlus size={14} aria-hidden="true"/>Photo</p>)}
+    {m.body&&<LinkedText text={m.body}/>}</div></div>
 }
 // Message or post text with its web links clickable, followed by a thumbnail for each YouTube video it links.
 function LinkedText({text}:{text:string}){
@@ -802,13 +808,21 @@ function LinkedText({text}:{text:string}){
     {youtubeIds(text).map(id=><a key={id} className="video-thumb" href={'https://www.youtube.com/watch?v='+id} target="_blank" rel="noopener noreferrer" aria-label="Watch the linked video on YouTube"><img src={'https://i.ytimg.com/vi/'+id+'/hqdefault.jpg'} alt="" loading="lazy" referrerPolicy="no-referrer"/><span className="video-play"><Play size={20}/></span></a>)}</>
 }
 function LinkedParts({text}:{text:string}){return <>{splitLinks(text).map((part,i)=>part.url?<a key={i} className="text-link" href={part.url} target="_blank" rel="noopener noreferrer nofollow">{part.text}</a>:part.text)}</>}
-// Writes a chat message: Enter sends, Shift+Enter starts a new line.
-function ChatComposer({to,onSend,onTyping}:{to:string;onSend:(body:string)=>Promise<boolean>;onTyping:()=>void}){
-  const [body,setBody]=useState(''),[busy,setBusy]=useState(false);
-  async function submit(){if(busy||!body.trim())return;setBusy(true);if(await onSend(body))setBody('');setBusy(false)}
-  return <form className="chat-composer" onSubmit={e=>{e.preventDefault();void submit()}}>
-    <textarea aria-label={'Write a message to '+to} value={body} maxLength={CHAT_LIMITS.message} rows={1} placeholder={'Message '+to+'…'} onChange={e=>{setBody(e.target.value);onTyping()}} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void submit()}}}/>
-    <button className="primary-btn" disabled={busy||!body.trim()} aria-label="Send message"><Send/></button>
+// Writes a chat message: Enter sends, Shift+Enter starts a new line. Pasting an image attaches it as the
+// message's one photo, compressed on the device; pasting another replaces it.
+function ChatComposer({to,onSend,onTyping}:{to:string;onSend:(body:string,photo?:File)=>Promise<boolean>;onTyping:()=>void}){
+  const [body,setBody]=useState(''),[photo,setPhoto]=useState<Preview|null>(null),[busy,setBusy]=useState(false);
+  const live=useRef(photo);useEffect(()=>{live.current=photo});
+  useEffect(()=>()=>{if(live.current)URL.revokeObjectURL(live.current.url)},[]);
+  function replacePhoto(next:Preview|null){if(photo)URL.revokeObjectURL(photo.url);setPhoto(next)}
+  async function paste(e:ReactClipboardEvent<HTMLTextAreaElement>){const file=Array.from(e.clipboardData.files).find(f=>f.type.startsWith('image/'));if(!file)return;
+    if(!e.clipboardData.getData('text/plain'))e.preventDefault();
+    setBusy(true);try{const small=await compressPhoto(file);replacePhoto({file:small,url:URL.createObjectURL(small)})}catch(err){toast.error((err as Error).message)}finally{setBusy(false)}}
+  async function submit(){if(busy||!body.trim()&&!photo)return;setBusy(true);if(await onSend(body,photo?.file)){setBody('');replacePhoto(null)}setBusy(false)}
+  return <form className="chat-composer-wrap" onSubmit={e=>{e.preventDefault();void submit()}}>
+    {photo&&<div className="board-previews"><span className="board-preview"><img src={photo.url} alt="Photo to send"/><button type="button" aria-label="Remove photo" onClick={()=>replacePhoto(null)}><X size={14}/></button></span></div>}
+    <div className="chat-composer"><textarea aria-label={'Write a message to '+to} value={body} maxLength={CHAT_LIMITS.message} rows={1} placeholder={'Message '+to+'…'} onPaste={e=>void paste(e)} onChange={e=>{setBody(e.target.value);onTyping()}} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void submit()}}}/>
+    <button className="primary-btn" disabled={busy||!body.trim()&&!photo} aria-label="Send message"><Send/></button></div>
   </form>
 }
 // Phone notifications for this player's chats. One device per player: turning them on here moves them from any

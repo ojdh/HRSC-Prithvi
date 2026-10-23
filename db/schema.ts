@@ -20,8 +20,9 @@ export const boardReactions = sqliteTable('board_reactions',{targetId:text('targ
 export const boardImages = sqliteTable('board_images',{key:text('key').primaryKey(),team:text('team').notNull(),postId:text('post_id').notNull(),commentId:text('comment_id'),createdAt:integer('created_at').notNull()},t=>[index('idx_board_images_post').on(t.postId)]);
 // Team formations: slots is the JSON list of markers (lib/formation.ts). updated_by is a player id and updated_at is unix milliseconds.
 export const formations = sqliteTable('formations',{id:text('id').primaryKey(),team:text('team').notNull(),name:text('name').notNull(),slots:text('slots').notNull(),updatedBy:text('updated_by').notNull(),updatedAt:integer('updated_at').notNull()},t=>[index('idx_formations_team').on(t.team,t.updatedAt)]);
-// Team chats: text-only messages, kept 90 days. Authors are player ids and created_at is unix milliseconds.
-export const chatMessages = sqliteTable('chat_messages',{id:text('id').primaryKey(),team:text('team').notNull(),author:text('author').notNull(),body:text('body').notNull(),createdAt:integer('created_at').notNull()},t=>[index('idx_chat_messages_team').on(t.team,t.createdAt)]);
+// Team chats: messages kept 90 days. Authors are player ids and created_at is unix milliseconds.
+// image is the R2 key of a message's one photo; body is empty for a photo sent without text.
+export const chatMessages = sqliteTable('chat_messages',{id:text('id').primaryKey(),team:text('team').notNull(),author:text('author').notNull(),body:text('body').notNull(),image:text('image'),createdAt:integer('created_at').notNull()},t=>[index('idx_chat_messages_team').on(t.team,t.createdAt)]);
 // One row per team chat. version moves on every send and delete, so a poll at the current version reads nothing else.
 export const chatState = sqliteTable('chat_state',{team:text('team').primaryKey(),version:integer('version').notNull().default(0),lastMessageAt:integer('last_message_at')});
 // Phone notifications: one Web Push subscription per player, so turning them on on a new device replaces the old one.
