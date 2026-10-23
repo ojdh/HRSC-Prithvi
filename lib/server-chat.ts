@@ -1,12 +1,14 @@
 import { ADMIN_CHAT, CHAT_LIMITS, type ChatPage, type ChatRoom } from './club';
 import { openTeamSpace, type BoardViewer } from './server-board';
 import { check, db } from './server-club';
+import { deleteObject, putObject } from './r2-budget';
+import type { UploadedImage } from './server-images';
 
 const MINUTE = 60_000;
 export const CHAT_RETENTION_MS = 90 * 24 * 60 * MINUTE;
 // A message after this long without one wakes the chat up, which is when its members get a notification.
 const WAKE_AFTER_MS = 5 * MINUTE;
-type MessageRow = { id: string; author: string; body: string; created_at: number };
+type MessageRow = { id: string; author: string; body: string; image: string | null; created_at: number };
 
 // A team chat opens like the team's board; the admin chat opens to the owner and active admins from every team.
 export function openChat(viewer: BoardViewer, room: unknown): ChatRoom {
@@ -34,7 +36,7 @@ export async function chatPage(team: ChatRoom, known: string | null, before: str
   const version = state?.version ?? 0, pace = refreshIn(state?.last_message_at ?? null);
   if (!older && known !== null && Number(known) === version) return { version, refreshIn: pace, unchanged: true };
   const size = from ? CHAT_LIMITS.window : CHAT_LIMITS.page;
-  const page = db().prepare('SELECT id,author,body,created_at FROM chat_messages WHERE team=?1 AND (?2 IS NULL OR created_at<?2 OR (created_at=?2 AND id<?3)) AND (?4 IS NULL OR created_at>?4 OR (created_at=?4 AND id>=?5)) ORDER BY created_at DESC,id DESC LIMIT ?6')
+  const page = db().prepare('SELECT id,author,body,image,created_at FROM chat_messages WHERE team=?1 AND (?2 IS NULL OR created_at<?2 OR (created_at=?2 AND id<?3)) AND (?4 IS NULL OR created_at>?4 OR (created_at=?4 AND id>=?5)) ORDER BY created_at DESC,id DESC LIMIT ?6')
     .bind(team, older?.createdAt ?? null, older?.id ?? null, from?.createdAt ?? null, from?.id ?? null, size + 1);
   // A window also asks whether anything is older than it, which costs at most one more row.
   const beneath = from && db().prepare('SELECT 1 FROM chat_messages WHERE team=?1 AND (created_at<?2 OR (created_at=?2 AND id<?3)) LIMIT 1').bind(team, from.createdAt, from.id);
@@ -43,7 +45,7 @@ export async function chatPage(team: ChatRoom, known: string | null, before: str
   const more = rows.length > size || !!probe?.results.length;
   return {
     version, refreshIn: pace,
-    messages: shown.map(m => ({ id: m.id, author: m.author, body: m.body, createdAt: m.created_at })),
+    messages: shown.map(m => ({ id: m.id, author: m.author, body: m.body, image: m.image, createdAt: m.created_at })),
     next: !more ? null : last ? `${last.created_at}:${last.id}` : since,
   };
 }
@@ -55,40 +57,60 @@ function readCursor(cursor: string | null) {
   return { createdAt: Number(parts[1]), id: parts[2] };
 }
 
-// Stores the message and says whether it woke the chat up: no message before it for WAKE_AFTER_MS.
-// The previous message time is read in the same transaction as the update.
-export async function sendMessage(team: ChatRoom, author: string, body: string) {
-  const id = crypto.randomUUID(), now = Date.now();
-  const [before] = await db().batch([
-    db().prepare('SELECT last_message_at FROM chat_state WHERE team=?').bind(team),
-    db().prepare('INSERT INTO chat_messages(id,team,author,body,created_at) VALUES(?,?,?,?,?)').bind(id, team, author, body, now),
-    db().prepare('INSERT INTO chat_state(team,version,last_message_at) VALUES(?1,1,?2) ON CONFLICT(team) DO UPDATE SET version=version+1,last_message_at=?2').bind(team, now),
-  ]);
+// Stores the message, and its photo under chat/<message id>, and says whether it woke the chat up: no message
+// before it for WAKE_AFTER_MS. The previous message time is read in the same transaction as the update.
+// Callers validate the photo first; if saving the message fails, the stored photo is deleted.
+export async function sendMessage(team: ChatRoom, author: string, body: string, photo?: UploadedImage) {
+  const id = crypto.randomUUID(), now = Date.now(), image = photo ? 'chat/' + id : null;
+  if (photo && image) await putObject(image, photo.bytes, photo.type);
+  let before;
+  try {
+    [before] = await db().batch([
+      db().prepare('SELECT last_message_at FROM chat_state WHERE team=?').bind(team),
+      db().prepare('INSERT INTO chat_messages(id,team,author,body,image,created_at) VALUES(?,?,?,?,?,?)').bind(id, team, author, body, image, now),
+      db().prepare('INSERT INTO chat_state(team,version,last_message_at) VALUES(?1,1,?2) ON CONFLICT(team) DO UPDATE SET version=version+1,last_message_at=?2').bind(team, now),
+    ]);
+  } catch (error) {
+    if (image) await deleteObject(image);
+    throw error;
+  }
   const previous = (before.results as { last_message_at: number | null }[])[0]?.last_message_at ?? null;
   return { id, wokeUp: previous === null || now - previous >= WAKE_AFTER_MS };
 }
 
 export async function findMessage(id: unknown) {
-  const message = typeof id === 'string' ? await db().prepare('SELECT id,team,author FROM chat_messages WHERE id=?').bind(id).first<{ id: string; team: ChatRoom; author: string }>() : null;
+  const message = typeof id === 'string' ? await db().prepare('SELECT id,team,author,image FROM chat_messages WHERE id=?').bind(id).first<{ id: string; team: ChatRoom; author: string; image: string | null }>() : null;
   check(message, 'This message was removed. Refresh the chat.', 404);
   return message;
 }
 
-export async function deleteMessage(message: { id: string; team: ChatRoom }) {
+// Deletes the message, then its photo. A failed photo delete is left to the daily storage clean-up.
+export async function deleteMessage(message: { id: string; team: ChatRoom; image: string | null }) {
   const [removed] = await db().batch([
     db().prepare('DELETE FROM chat_messages WHERE id=?').bind(message.id),
     db().prepare('UPDATE chat_state SET version=version+1 WHERE team=?').bind(message.team),
   ]);
   check(removed.meta.changes === 1, 'This message was removed. Refresh the chat.', 404);
+  if (message.image) await deleteObject(message.image);
 }
 
-// Daily cron: deletes messages past the retention period and moves each affected chat's version,
-// so open chats drop them on their next poll.
+// The chat a photo belongs to, so it is shown only to people who can open that chat.
+export async function photoRoom(key: string | null) {
+  const id = key && /^chat\/([a-f0-9-]{36})$/.exec(key)?.[1];
+  const message = id ? await db().prepare('SELECT team FROM chat_messages WHERE id=? AND image=?').bind(id, key).first<{ team: ChatRoom }>() : null;
+  check(message, 'Photo not found.', 404);
+  return message.team;
+}
+
+// Daily cron: deletes messages past the retention period, and their photos, and moves each affected chat's
+// version, so open chats drop them on their next poll.
 export async function deleteOldMessages() {
   const cutoff = Date.now() - CHAT_RETENTION_MS;
-  const [, removed] = await db().batch([
+  const [photos, , removed] = await db().batch([
+    db().prepare('SELECT image FROM chat_messages WHERE created_at<? AND image IS NOT NULL').bind(cutoff),
     db().prepare('UPDATE chat_state SET version=version+1 WHERE team IN (SELECT DISTINCT team FROM chat_messages WHERE created_at<?)').bind(cutoff),
     db().prepare('DELETE FROM chat_messages WHERE created_at<?').bind(cutoff),
   ]);
-  console.log('Chat clean-up finished', { removed: removed.meta.changes });
+  for (const { image } of photos.results as { image: string }[]) await deleteObject(image);
+  console.log('Chat clean-up finished', { removed: removed.meta.changes, photos: photos.results.length });
 }

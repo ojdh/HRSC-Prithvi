@@ -787,7 +787,9 @@ try{
     ok((await send(janitor,'/api/video','owner',{target:'matchday',dayId:cleanupDay,video:clipFile()})).status===200,'clean-up fixture: matchday clip stored');
     ok((await send(janitor,'/api/board','owner',{action:'createPost',team:'red',body:'Kit photos',images:photoFile()})).status===200,'clean-up fixture: board image stored');
     const boardKey=(await (await janitor.dispatchFetch(origin+'/api/board?team=red',{headers:await headers('owner')})).json()).posts[0].images[0];
-    const fixture=await clubOf(),referenced=[fixture.players[0].photo,fixture.players[0].highlights[0].key,fixture.teams.red.photo,fixture.days[0].videoKey,boardKey];
+    ok((await send(janitor,'/api/chat','owner',{action:'send',team:'red',body:'',image:photoFile()})).status===200,'clean-up fixture: chat photo stored');
+    const chatKey=(await (await janitor.dispatchFetch(origin+'/api/chat?team=red',{headers:await headers('owner')})).json()).messages[0].image;
+    const fixture=await clubOf(),referenced=[fixture.players[0].photo,fixture.players[0].highlights[0].key,fixture.teams.red.photo,fixture.days[0].videoKey,boardKey,chatKey];
     const ledger=await janitor.getD1Database('DB');
     ok((await ledger.prepare('SELECT count(*) AS n FROM r2_objects WHERE created_at>=unixepoch()-60').first()).n===referenced.length,'uploads record when they were stored');
     await ledger.prepare('UPDATE r2_objects SET created_at=unixepoch()-7200').run();
@@ -920,7 +922,7 @@ try{
     ok((await boardTight.dispatchFetch(origin+'/api/board/image?key='+encodeURIComponent(key),{headers:await headers('tight-black')})).status===403&&await used('class_b')===0,'a refused board photo view costs no R2 operation');
     ok((await boardTight.dispatchFetch(origin+'/api/board/image?key='+encodeURIComponent(key),{headers:await headers('owner')})).status===200,'the one budgeted board photo view still fits');
   }finally{await boardTight.dispose()}
-  // Team chat: each team's private, text-only conversation, open only to that team's players. It never touches R2.
+  // Team chat: each team's private conversation, open only to that team's players. Text never touches R2; a pasted photo is stored like a board photo.
   const chats=new Miniflare({...workerOptions,bindings:{...accessBindings,...budget({storage:1e9,classA:1e6,classB:1e7})}});
   try{
     const ownerId=await setUp(chats);
@@ -952,7 +954,7 @@ try{
     ok((await say('chat-red','red','')).status===400&&(await say('chat-red','red','  \n ')).status===400,'a message needs text');
     ok((await say('chat-red','red','x'.repeat(1001))).status===400,'messages are capped at 1000 characters');
     ok((await chatSend('chat-red',{action:'send',team:'red',body:'Forged'},{Origin:'https://evil.test'})).status===403,'cross-site sends are refused');
-    ok((await send(chats,'/api/chat','chat-red',{action:'send',team:'red',body:'With a photo',images:photoFile()})).status===415,'chat takes text only, not photo uploads');
+    ok((await chatSend('chat-red',{action:'send',team:'red',body:'Plain'},{'Content-Type':'text/plain'})).status===415,'chat takes JSON or a photo form, nothing else');
     ok(await messageCount()===countBefore,'refused messages store nothing');
     ok((await say('chat-red','red','x'.repeat(1000))).status===200,'a 1000-character message fits');
     // Polling: an unchanged chat sends no messages back, and the server sets the pace
@@ -1018,6 +1020,27 @@ try{
     const partial=(await readChat('chat-black','black',{since:page1.next})).data;
     ok(partial.messages.at(-1).createdAt+':'+partial.messages.at(-1).id===page1.next&&partial.next===page1.next,'the window says when older messages remain beneath it');
     ok((await readChat('chat-black','black',{since:'nonsense'})).status===400&&(await readChat('chat-black','black',{since,before:since})).status===400,'a malformed or conflicting window is rejected');
+    // Photos: a message can carry one photo, sent as a form; text is optional then. Only the chat's members see it.
+    ok(await r2Used()===0&&await storedObjects(chats)===0,'text messages never touch R2');
+    const chatImage=async(user,key)=>chats.dispatchFetch(origin+'/api/chat/image?key='+encodeURIComponent(key),{headers:user?await headers(user):{}});
+    const photoSend=(user,fields)=>send(chats,'/api/chat',user,{action:'send',...fields});
+    ok((await photoSend('chat-red',{team:'red',body:'Not a photo',image:new File([Buffer.from('not an image')],'x.png',{type:'image/png'})})).status===400,'a chat photo must be a real image');
+    ok((await photoSend('chat-red',{team:'red',body:'Too big',image:new File([new Uint8Array(2*1024*1024+1)],'big.jpg',{type:'image/jpeg'})})).status>=400,'a chat photo is capped at 2 MB');
+    ok((await photoSend('chat-red',{team:'black',body:'',image:photoFile()})).status===403,'players cannot send a photo to another team’s chat');
+    ok((await photoSend('chat-red',{team:'red',body:'  '})).status===400,'a form message needs text or a photo');
+    ok(await r2Used()===0&&await storedObjects(chats)===0,'rejected photos cost no R2 operation');
+    ok((await photoSend('chat-red',{team:'red',body:'',image:photoFile()})).status===200,'a player sends a pasted photo with no text');
+    ok((await photoSend('chat-red2',{team:'red',body:'Kit for Saturday',image:photoFile()})).status===200,'a player sends a photo with text');
+    const [captioned,bare]=(await readChat('chat-red','red')).data.messages;
+    ok(bare.body===''&&/^chat\/[a-f0-9-]{36}$/.test(bare.image)&&captioned.body==='Kit for Saturday'&&captioned.image&&!(await readChat('chat-red','red')).data.messages.slice(2).some(m=>m.image),'photo messages carry their image key; text messages carry none');
+    const shownPhoto=await chatImage('chat-red2',bare.image);
+    ok(shownPhoto.status===200&&shownPhoto.headers.get('content-type')==='image/png'&&/^private/.test(shownPhoto.headers.get('cache-control')),'a teammate sees the chat photo');
+    ok((await chatImage('chat-black',bare.image)).status===403,'another team’s chat photo is private');
+    ok((await chatImage(null,bare.image)).status===401,'chat photos need sign-in');
+    ok((await chatImage('chat-red','chat/'+crypto.randomUUID())).status===404&&(await chatImage('chat-red','board/'+crypto.randomUUID())).status===404,'unknown chat photos are not found');
+    ok(await storedObjects(chats)===2,'each chat photo is one stored object');
+    ok((await chatSend('chat-red2',{action:'delete',messageId:captioned.id})).status===200&&await storedObjects(chats)===1&&(await chatImage('chat-red',captioned.image)).status===404,'deleting a photo message deletes its photo');
+    await chatDb.prepare('UPDATE chat_messages SET created_at=? WHERE id=?').bind(Date.now()-91*86_400_000,bare.id).run();
     // Retention: the daily cron removes messages older than 90 days and tells viewers
     const day=86_400_000;
     await chatDb.prepare('UPDATE chat_messages SET created_at=? WHERE body LIKE ?').bind(Date.now()-91*day,'Pitch is booked.%').run();
@@ -1028,7 +1051,7 @@ try{
     const kept=(await readChat('chat-red','red')).data;
     ok(!kept.messages.some(m=>m.body.startsWith('Pitch is booked'))&&kept.version>versionBeforeCron,'messages older than 90 days are deleted and the version moves');
     ok(!!(await chatDb.prepare('SELECT 1 AS found FROM chat_messages WHERE body=?').bind('Message 1').first()),'messages younger than 90 days are kept');
-    ok(await r2Used()===0&&await storedObjects(chats)===0,'chat never touches R2');
+    ok(await storedObjects(chats)===0&&!(await chatDb.prepare('SELECT 1 AS found FROM r2_objects').first()),'expired photo messages lose their photo too');
   }finally{await chats.dispose()}
   // The installable app: manifest, icons, service worker and offline page ship with the build.
   const manifest=JSON.parse(await readFile('dist/client/manifest.webmanifest','utf8'));

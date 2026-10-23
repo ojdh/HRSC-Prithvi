@@ -53,7 +53,8 @@ export type BoardPage={posts:BoardPost[];next:string|null};
 export const ADMIN_CHAT='admins';
 export type ChatRoom=Team|typeof ADMIN_CHAT;
 export const CHAT_LIMITS={message:1000,page:50,window:500} as const;
-export type ChatMessage={id:string;author:string;body:string;createdAt:number};
+// image is the R2 key of the message's photo, if it has one; body is empty for a photo sent without text.
+export type ChatMessage={id:string;author:string;body:string;image:string|null;createdAt:number};
 export type ChatPage={version:number;refreshIn:number}&({unchanged:true}|{unchanged?:undefined;messages:ChatMessage[];next:string|null});
 // adminId is the owner's account: the only person who can grant or remove admin rights. admins and fairPlayVoters hold player ids.
 export type Club = {adminId:string;admins:string[];fairPlayVoters?:string[];teams:Record<Team,TeamInfo>;players:Player[];days:Day[];log?:LogEntry[]};
