@@ -59,21 +59,17 @@ function readCursor(cursor: string | null) {
 
 // Stores the message, and its photo under chat/<message id>, and says whether it woke the chat up: no message
 // before it for WAKE_AFTER_MS. The previous message time is read in the same transaction as the update.
-// Callers validate the photo first; if saving the message fails, the stored photo is deleted.
+// Callers validate the photo first. If saving the message fails, the photo is left for the daily storage
+// clean-up rather than deleted here: a failure reported after the save committed would otherwise leave
+// the message pointing at a deleted photo.
 export async function sendMessage(team: ChatRoom, author: string, body: string, photo?: UploadedImage) {
   const id = crypto.randomUUID(), now = Date.now(), image = photo ? 'chat/' + id : null;
   if (photo && image) await putObject(image, photo.bytes, photo.type);
-  let before;
-  try {
-    [before] = await db().batch([
-      db().prepare('SELECT last_message_at FROM chat_state WHERE team=?').bind(team),
-      db().prepare('INSERT INTO chat_messages(id,team,author,body,image,created_at) VALUES(?,?,?,?,?,?)').bind(id, team, author, body, image, now),
-      db().prepare('INSERT INTO chat_state(team,version,last_message_at) VALUES(?1,1,?2) ON CONFLICT(team) DO UPDATE SET version=version+1,last_message_at=?2').bind(team, now),
-    ]);
-  } catch (error) {
-    if (image) await deleteObject(image);
-    throw error;
-  }
+  const [before] = await db().batch([
+    db().prepare('SELECT last_message_at FROM chat_state WHERE team=?').bind(team),
+    db().prepare('INSERT INTO chat_messages(id,team,author,body,image,created_at) VALUES(?,?,?,?,?,?)').bind(id, team, author, body, image, now),
+    db().prepare('INSERT INTO chat_state(team,version,last_message_at) VALUES(?1,1,?2) ON CONFLICT(team) DO UPDATE SET version=version+1,last_message_at=?2').bind(team, now),
+  ]);
   const previous = (before.results as { last_message_at: number | null }[])[0]?.last_message_at ?? null;
   return { id, wokeUp: previous === null || now - previous >= WAKE_AFTER_MS };
 }
