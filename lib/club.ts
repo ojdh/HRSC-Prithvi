@@ -203,11 +203,13 @@ export function scoreLines(day:Day,players:Player[],tally:{candidate:string;vote
   const tenth=(n:number)=>Math.round(n*10)/10;
   return dayScores(day,players,tally).map(l=>({candidate:l.id,score:tenth(l.score),games:l.games,goals:l.goals,assists:l.assists,conceded:l.concededCounts?l.conceded:null,points:tenth(l.points),votes:l.votes}));
 }
-// A player's stat points as the working that reaches them: each count times its weight for the player's position and tier,
-// the game points, and for keepers and defenders the base minus the penalty per goal conceded.
+// A player's stat points as the working that reaches them: the points for their goals and assists as one total (the
+// per-goal and per-assist weights would show the player's tier), the game points, and for keepers and defenders the
+// base minus the penalty per goal conceded.
 export function pointsFormula(line:Pick<ReturnType<typeof dayScores>[number],'goals'|'assists'|'games'|'goalValue'|'assistValue'|'base'|'conceded'|'points'>){
   const count=(n:number,noun:string)=>n+' '+noun+(n===1?'':'s'),num=(n:number)=>String(Math.round(n*10)/10);
-  const terms=[count(line.goals,'goal')+' × '+num(line.goalValue),count(line.assists,'assist')+' × '+num(line.assistValue),count(line.games,'game')+' × '+GAME_POINTS];
+  const scoring=num(line.goals*line.goalValue+line.assists*line.assistValue)+' ('+count(line.goals,'goal')+', '+count(line.assists,'assist')+')';
+  const terms=[scoring,count(line.games,'game')+' × '+GAME_POINTS];
   if(line.base!==undefined)terms.push(line.base+' base − '+line.conceded+' conceded × '+CONCEDED_PENALTY);
   return terms.join(' + ')+' = '+num(line.points);
 }
