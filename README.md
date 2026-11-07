@@ -119,7 +119,7 @@ Afterwards, run the Deploy workflow in GitHub Actions (`.github/workflows/deploy
 
 ## Assets
 
-Football photograph: Emilio Garcia, https://unsplash.com/photos/man-playing-soccer-game-on-field-AWdCgDDedH0 (Unsplash License). Nimbus fonts: URW base35; license notice in `public/fonts/LICENSE.txt`; upstream source https://github.com/ArtifexSoftware/urw-base35-fonts.
+Club photographs in `public/photos` were supplied by the club. Nimbus fonts: URW base35; license notice in `public/fonts/LICENSE.txt`; upstream source https://github.com/ArtifexSoftware/urw-base35-fonts.
 
 ## Navigation and admin
 
@@ -146,7 +146,7 @@ Use the matchday and team pages on the hosted site for routine score and roster 
 
 ## Homepage and routes
 
-The public club homepage is `/`. The existing member app is `/winterleague`. Older `/?view=...` links redirect while preserving parameters; legacy hash invitations and setup links are forwarded. Inside the app every page has its own address, built and read by `lib/routes.ts`: `view` (the page), `day`, `tab` (the section on the page), `team` and `player` (an open player card). Opening a page or a player card adds a browser history entry, so Back and Forward move between them, and links shared before a page moved are mapped to its current place. Invitation cookies, accounts, APIs and storage remain unchanged. The website's team cards link to each team's page. Stock football images are editorial photographs, not pictures of club members; replace their source paths in `app/home-page.tsx` with your club photographs.
+The public club homepage is `/`. It covers the club's outdoor league squad and its indoor Winter league, thanks the club's sponsor, and leads players to sign in. The existing member app is `/winterleague`. Older `/?view=...` links redirect while preserving parameters; legacy hash invitations and setup links are forwarded. Inside the app every page has its own address, built and read by `lib/routes.ts`: `view` (the page), `day`, `tab` (the section on the page), `team` and `player` (an open player card). Opening a page or a player card adds a browser history entry, so Back and Forward move between them, and links shared before a page moved are mapped to its current place. Invitation cookies, accounts, APIs and storage remain unchanged. The website's team cards link to each team's page. Stock football images are editorial photographs, not pictures of club members; replace their source paths in `app/home-page.tsx` with your club photographs.
 
 The future domain `prithvifc.ca` can use this same root and `/winterleague` structure once connected to hosting and DNS. It has not been registered or connected by this code change.
 

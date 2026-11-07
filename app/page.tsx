@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import HomePage from './home-page';
-export const metadata:Metadata={title:'Prithvi FC',description:'The home of Prithvi FC. Explore the Winter league, teams, player profiles and match days.'};
+export const metadata:Metadata={title:'Prithvi FC',description:'The home of Prithvi FC (HRSC–Prithvi): our outdoor league squad and indoor Winter league. Players sign in for results, votes and team chat.'};
 export default async function Home({searchParams}:{searchParams:Promise<Record<string,string|string[]|undefined>>}){
   const params=await searchParams;
   if(['view','day','tab','team','player','invite','invite_error'].some(key=>params?.[key])){
