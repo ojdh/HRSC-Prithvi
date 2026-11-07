@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { z } from 'zod';
 import { getUser } from '../../auth';
-import { TEAMS,DEFAULT_TEAMS,TIERS,SCORING_POSITIONS,voteCandidates,scoreLines,MAX_SERIES_DAYS,DELETION_APPROVALS,LOG_LIMIT,nextMatch,incumbentAt,result,snapshot,isPlayed,emptyClub,isReady,isVideoUrl,validDate,weeklyDates,clubToday,type Club,type Day,type Tier,type Team,type DayLogEntry,type Player } from '@/lib/club';
+import { TEAMS,DEFAULT_TEAMS,TIERS,SCORING_POSITIONS,voteCandidates,scoreLines,scoringOf,MAX_SERIES_DAYS,DELETION_APPROVALS,LOG_LIMIT,nextMatch,incumbentAt,result,snapshot,isPlayed,emptyClub,isReady,isVideoUrl,validDate,weeklyDates,clubToday,type Club,type Day,type Tier,type Team,type DayLogEntry,type Player } from '@/lib/club';
 import { db,readClub,saveClub,check,digest,token,role,ClubError } from '@/lib/server-club';
 import {pendingInvite,findInvitation,inviteCookie} from '@/lib/server-invitations';
 import {deleteObject} from '@/lib/r2-budget';
@@ -150,6 +150,8 @@ export async function POST(req:Request){try{
       // Like removal, this works at any time, so a player missed from a played day can be added and then put into its games with Edit.
       check(isReady(day),'Set up the matchday before adding late arrivals.');
       check(!day.roster.some(r=>r.id===input.playerId),'This player is already marked as attending.');day.roster.push(attendee(club,input.playerId));
+      // On a closed day, a player added now is scored at the position and tier they have now, or those they had if added before.
+      if(day.scoring)day.scoring[input.playerId]??=scoringOf(club.players.find(p=>p.id===input.playerId)!);
       record(club,actor(me),'addAttendee',day,{player:input.playerId});
     }else if(action==='removeAttendee'){
       const input=z.object({dayId:id,playerId:id}).parse(body);const day=club.days.find(d=>d.id===input.dayId);check(day,'Match day not found.');
@@ -200,6 +202,8 @@ export async function POST(req:Request){try{
       const day=club.days.find(d=>d.id===body.dayId);check(day?.ended,'This matchday has not ended.');delete day.ended;
     }else if(action==='openPoll'||action==='closePoll'){
       const day=club.days.find(d=>d.id===body.dayId);check(day,'Match day not found.');check(action==='closePoll'||isReady(day),'Set attendance and opening teams first.');check(action==='closePoll'||day.date<=clubToday(),'Voting opens on or after the match day.');check(day.poll===(action==='openPoll'?'ready':'open'),'Voting has already changed.');day.poll=action==='openPoll'?'open':'closed';
+      // Closing freezes each attending player's position and tier, so later changes leave this day's scores alone.
+      if(day.poll==='closed')day.scoring=Object.fromEntries(day.roster.map(r=>[r.id,scoringOf(club.players.find(p=>p.id===r.id)!)]));
     }else if(action==='setMatchVideo'){
       const day=club.days.find(d=>d.id===body.dayId);check(day,'Match day not found.');day.videoUrl=videoUrl.parse(body.videoUrl)||null;
     }else if(action==='setRoundVideo'){
