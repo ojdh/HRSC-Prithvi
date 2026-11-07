@@ -183,16 +183,17 @@ export function scoringOf(p:Player):{position:ScoringPosition;tier:Tier}{return 
 // Each active attending player's combined score for a day, highest first: stat points and votes, each divided by the day's
 // highest and worth 50, out of 100. Goals conceded are those against the player's team in the games they played; own goals
 // count against the conceding team but earn nobody points. A defensive score can go below zero.
+// A closed day uses the positions and tiers frozen on it when voting closed; any other day, the current ones.
 export function dayScores(day:Day,players:Player[],tally:{candidate:string;votes:number}[]){
   const lines=voteCandidates(players,day).map(r=>{
-    const p=players.find(x=>x.id===r.id)!,{position,tier}=scoringOf(p);let goals=0,assists=0,games=0,conceded=0;
+    const p=players.find(x=>x.id===r.id)!,{position,tier}=day.scoring?.[p.id]??scoringOf(p);let goals=0,assists=0,games=0,conceded=0;
     for(const round of day.rounds){
       if(round.lineup.includes(p.id)){games++;conceded+=round.goals.filter(g=>g.team!==r.team).length;}
       for(const g of round.goals)if(!g.ownGoal){if(g.scorer===p.id)goals++;if(g.assist===p.id)assists++;}
     }
     const goal=(POSITION_POINTS[position].goal+TIER_POINTS[tier].goal)/2,assist=(POSITION_POINTS[position].assist+TIER_POINTS[tier].assist)/2,base=DEFENCE_BASE[position];
     const points=goals*goal+assists*assist+games*GAME_POINTS+(base===undefined?0:base-CONCEDED_PENALTY*conceded);
-    return {id:p.id,goals,assists,games,conceded,concededCounts:base!==undefined,goalValue:goal,assistValue:assist,base,points,votes:tally.find(t=>t.candidate===p.id)?.votes??0};
+    return {id:p.id,position,goals,assists,games,conceded,concededCounts:base!==undefined,goalValue:goal,assistValue:assist,base,points,votes:tally.find(t=>t.candidate===p.id)?.votes??0};
   });
   const maxPoints=Math.max(0,...lines.map(l=>l.points)),maxVotes=Math.max(0,...lines.map(l=>l.votes));
   return lines.map(l=>{const statScore=maxPoints?50*l.points/maxPoints:0,voteScore=maxVotes?50*l.votes/maxVotes:0;return {...l,statScore,voteScore,score:statScore+voteScore}}).sort((a,b)=>b.score-a.score);

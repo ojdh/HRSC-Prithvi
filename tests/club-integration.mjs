@@ -207,7 +207,7 @@ try{
   await success('editTeam',tigers);
   const afterTeams=(await get('black-user')).data;
   ok(JSON.stringify(afterTeams.teams.black)===JSON.stringify({name:'Tigers',color:'#1f7a4d',letter:'T',motto:'Hunt as one.'}),'team details saved and normalised');
-  ok(afterTeams.teams.red.name==='Team Red'&&JSON.stringify(afterTeams.days)===JSON.stringify(beforeTeams.days)&&afterTeams.players.find(p=>p.id===black.id).team==='black','renaming keeps rosters, rounds and assignments');
+  ok(afterTeams.teams.red.name==='Team Red'&&JSON.stringify((await get()).data.days)===JSON.stringify(beforeTeams.days)&&afterTeams.players.find(p=>p.id===black.id).team==='black','renaming keeps rosters, rounds and assignments');
   // Captains: an admin names one active player per team; leaving the team or the roster clears it.
   const captainOf=async t=>(await get('black-user')).data.teams[t].captain??null;
   ok((await post('setCaptain',{team:'red',playerId:red.id},'black-user')).status===403,'players cannot name a captain');
@@ -392,7 +392,12 @@ try{
   // Scoring position and tier: set by admins only and never sent to players; players see each closed day's score lines.
   ok((await post('setScoring',{playerId:black.id,tier:1,scoringPosition:'Forward'},'black-user')).status===403,'players cannot set scoring');
   for(const bad of [{tier:6},{tier:0},{scoringPosition:'All-rounder'},{playerId:'missing'}])ok((await post('setScoring',{playerId:black.id,tier:1,scoringPosition:'Forward',...bad})).status===400,'invalid scoring rejected: '+JSON.stringify(bad));
+  const closedScores=async day=>(await get('black-user')).data.polls[day].scores,mainBefore=await closedScores(dayId),recountBefore=await closedScores(recountDay);
   await success('setScoring',{playerId:black.id,tier:1,scoringPosition:'Forward'});
+  await success('setScoring',{playerId:red.id,tier:2,scoringPosition:'Defender'});
+  // A closed matchday keeps the position and tier each player had when its voting closed.
+  ok(JSON.stringify(await closedScores(dayId))===JSON.stringify(mainBefore),'changing a player\'s tier and scoring position leaves closed matchdays\' scores alone');
+  ok(JSON.stringify((await closedScores(recountDay)).find(s=>s.candidate===red.id))===JSON.stringify(recountBefore.find(s=>s.candidate===red.id)),'a player added after voting closed keeps the position and tier they had when added');
   const adminView=(await get()).data,playerView=(await get('black-user')).data;
   ok(adminView.players.find(p=>p.id===black.id).tier===1&&adminView.players.find(p=>p.id===black.id).scoringPosition==='Forward','admins see each player\'s scoring');
   ok(playerView.players.every(p=>!('tier' in p)&&!('scoringPosition' in p)),'players never receive tiers or scoring positions');
