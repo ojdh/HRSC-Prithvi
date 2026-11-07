@@ -1260,7 +1260,7 @@ try{
   const oldClub=new Miniflare({...workerOptions,bindings:accessBindings});
   try{
     await migrate(oldClub,f=>f<'0004');
-    await (await oldClub.getD1Database('DB')).prepare('INSERT INTO club (id,revision,data) VALUES (1,0,?)').bind(JSON.stringify({adminId:'owner',players:[{id:'legacy-owner',name:'Organiser',team:'red',userId:'owner',age:null,height:null,district:null,position:'All-rounder',photo:null},{id:'legacy-aged',name:'Aged player',team:'black',age:31,height:null,district:null,position:'Forward',photo:null}],days:[{id:'legacy-day',date:'2026-09-06',roster:[{id:'legacy-owner',team:'red'}],opening:['red','black'],firstExit:'red',rounds:[],poll:'ready'}]})).run();
+    await (await oldClub.getD1Database('DB')).prepare('INSERT INTO club (id,revision,data) VALUES (1,0,?)').bind(JSON.stringify({adminId:'owner',players:[{id:'legacy-owner',name:'Organiser',team:'red',userId:'owner',age:null,height:null,district:null,position:'All-rounder',photo:null},{id:'legacy-aged',name:'Aged player',team:'black',userId:'aged-user',age:31,height:null,district:null,position:'Forward',tier:2,scoringPosition:'Defender',photo:null}],days:[{id:'legacy-day',date:'2026-09-06',roster:[{id:'legacy-owner',team:'red'}],opening:['red','black'],firstExit:'red',rounds:[],poll:'ready'},...['open','closed'].map((poll,i)=>({id:'legacy-'+poll,date:'2026-09-1'+i,roster:[{id:'legacy-owner',team:'red'},{id:'legacy-aged',team:'black'}],opening:['red','black'],firstExit:'red',rounds:[],poll}))]})).run();
     await migrate(oldClub,f=>f>='0004');
     const view=await (await oldClub.dispatchFetch(origin+'/api/club',{headers:await headers('owner')})).json();
     ok(view.isOwner&&view.isAdmin&&view.owner==='legacy-owner'&&Array.isArray(view.admins)&&view.admins.length===0,'oldClub club gains an empty admin list');
@@ -1269,6 +1269,10 @@ try{
     ok(JSON.stringify(view.teams)===JSON.stringify(model.DEFAULT_TEAMS),'legacy club gains the default team details');
     ok(view.days[0].start==='07:00'&&view.days[0].end==='08:30'&&model.isReady(view.days[0]),'legacy match days keep their 7:00–8:30 slot and setup');
     ok(view.players.length===2&&view.players.every(p=>!('age' in p))&&view.players.find(p=>p.id==='legacy-aged').name==='Aged player','ages are cleared from every player by the birth-month migration');
+    ok(JSON.stringify(view.days.find(d=>d.id==='legacy-closed').scoring)==='{"legacy-owner":{"position":"Midfielder","tier":3},"legacy-aged":{"position":"Defender","tier":2}}','a matchday closed before scoring was frozen keeps each attending player\'s current position and tier, with unset ones at their defaults');
+    ok(view.days.filter(d=>d.id!=='legacy-closed').every(d=>!('scoring' in d)),'matchdays whose voting has not closed are not frozen');
+    const legacyPlayerView=await (await oldClub.dispatchFetch(origin+'/api/club',{headers:await headers('aged-user')})).json();
+    ok(legacyPlayerView.days.length===3&&legacyPlayerView.days.every(d=>!('scoring' in d)),'players never receive a matchday\'s frozen positions and tiers');
   }finally{await oldClub.dispose()}
   console.log(JSON.stringify({passed:checks,productionDataTouched:false}));
 }finally{await mf.dispose()}

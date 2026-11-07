@@ -22,7 +22,8 @@ export type Keepers = Partial<Record<Team,string>>;
 export type Round = {id:string;a:Team;b:Team;scoreA:number;scoreB:number;goals:Goal[];lineup:string[];keepers?:Keepers;exit:Team;winner:Team|null;videoUrl?:string|null};
 // A scheduled day has an empty roster and no opening teams until it is set up on the day. start/end are club-local HH:MM.
 // ended: an admin ended the session, so no new games are added until it is resumed.
-export type Day = {id:string;date:string;start:string;end:string;roster:{id:string;team:Team}[];opening:[Team,Team]|null;firstExit:Team|null;rounds:Round[];poll:'ready'|'open'|'closed';ended?:boolean;videoUrl?:string|null;videoKey?:string|null;deletion?:DayDeletion};
+// scoring: once voting closes, each attending player's scoring position and tier for this day, by player id. Admins only.
+export type Day = {id:string;date:string;start:string;end:string;roster:{id:string;team:Team}[];opening:[Team,Team]|null;firstExit:Team|null;rounds:Round[];poll:'ready'|'open'|'closed';ended?:boolean;videoUrl?:string|null;videoKey?:string|null;deletion?:DayDeletion;scoring?:Record<string,{position:ScoringPosition;tier:Tier}>};
 // A request to delete a played matchday. approvals holds player ids; the requester's counts as the first.
 export type DayDeletion = {requestedBy:string;approvals:string[]};
 export const DELETION_APPROVALS=3;

@@ -33,7 +33,7 @@ export async function GET(req:Request){try{
   const polls=Object.fromEntries(days.map(d=>{const votes=playerOfTheDay[d.id];
     return [d.id,{...votes,tally:admin?votes.tally:[],fairPlay:fairPlay[d.id],...(d.poll==='closed'?{scores:scoreLines(d,club.players,votes.tally)}:{})}];}));
   const fairPlayVoters=club.fairPlayVoters??[];
-  return response({initialized:true,revision,isAdmin:admin,isOwner:owner,owner:club.players.find(p=>p.userId===club.adminId)?.id??null,admins:club.admins,fairPlayVoters:admin?fairPlayVoters:fairPlayVoters.filter(v=>v===me?.id),teams:club.teams,me:me?.id??null,players:club.players.map(({userId,inviteHash,legacyInviteHash,inviteToken,email,accessEmail,tier,scoringPosition,...p})=>({...p,linked:!!userId,...(admin?{email,accessEmail,tier,scoringPosition}:{})})),days:admin?club.days:club.days.map(({deletion,...d})=>d),polls,...(admin?{log:club.log??[]}:{})});
+  return response({initialized:true,revision,isAdmin:admin,isOwner:owner,owner:club.players.find(p=>p.userId===club.adminId)?.id??null,admins:club.admins,fairPlayVoters:admin?fairPlayVoters:fairPlayVoters.filter(v=>v===me?.id),teams:club.teams,me:me?.id??null,players:club.players.map(({userId,inviteHash,legacyInviteHash,inviteToken,email,accessEmail,tier,scoringPosition,...p})=>({...p,linked:!!userId,...(admin?{email,accessEmail,tier,scoringPosition}:{})})),days:admin?club.days:club.days.map(({deletion,scoring,...d})=>d),polls,...(admin?{log:club.log??[]}:{})});
 }catch(e){return fail(e);}}
 export async function POST(req:Request){try{
   const origin=req.headers.get('origin');check(!origin||origin===new URL(req.url).origin,'This request must come from the club website.',403);
