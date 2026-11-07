@@ -467,6 +467,13 @@ try{
     d3:{scores:[line('ann',0),line('bo',0)]},
     d4:{scores:[line('dee',100)]}});
   ok(JSON.stringify(season)===JSON.stringify([{candidate:'ann',points:6,first:2,second:0,third:0},{candidate:'bo',points:5,first:1,second:1,third:0},{candidate:'cy',points:2,first:0,second:0,third:2}]),'player of the season adds 3, 2 and 1 points per closed matchday, ties sharing a place');}
+  // Average stat points over the closed matchdays a player was scored on, and the points behind them day by day.
+  {const line=(candidate,points)=>({candidate,score:0,games:1,goals:0,assists:0,conceded:null,points,votes:0}),day=(id,date,poll='closed')=>({id,date,poll});
+  const days=[day('d2','2026-10-11'),day('d1','2026-10-04'),day('d3','2026-10-18','open')],polls={d1:{scores:[line('ann',30),line('bo',12.5)]},d2:{scores:[line('ann',20.5),line('cy',-1)]},d3:{scores:[line('ann',100)]}};
+  ok(JSON.stringify(model.averageStatPoints(days,polls))==='[{"candidate":"ann","matchdays":2,"average":25.25},{"candidate":"bo","matchdays":1,"average":12.5},{"candidate":"cy","matchdays":1,"average":-1}]','average stat points cover closed matchdays only, highest first, with the number of matchdays behind each');
+  ok(model.averageStatPoints([day('d9','2026-11-01')],{}).length===0,'a closed matchday without score lines adds no averages');
+  ok(JSON.stringify(model.pointsByMatchday(days,polls,'ann'))==='[{"date":"2026-10-04","points":30},{"date":"2026-10-11","points":20.5}]','a player\'s stat points on each closed matchday they were scored on, oldest first');
+  ok(model.pointsByMatchday(days,polls,'dee').length===0,'a player never scored on a closed matchday has no points to chart');}
   const played=(id,roster)=>({id,date:'2026-09-06',start:'07:00',end:'08:30',roster,opening:['red','black'],firstExit:'red',poll:'ready',rounds:[{id:'r',a:'red',b:'black',scoreA:0,scoreB:0,goals:[],lineup:[],exit:'red',winner:null}]});
   const [regular]=model.playerStats([{id:'p',name:'P',team:'red'}],[played('d1',[{id:'p',team:'red'}]),played('d2',[]),{...played('d3',[{id:'p',team:'red'}]),rounds:[]}]);
   ok(regular.attended===1&&regular.attendance===50,'attendance counts played matchdays only');
@@ -521,14 +528,9 @@ try{
   const payload=model.roundPayload(draft,'red','black');
   ok(payload.scoreA===2&&payload.scoreB===1&&payload.goals.length===3&&JSON.stringify(payload.lineup)==='["p1","p2"]','round payload derives the score from goals');
   ok(JSON.stringify(model.roundPayload(model.freshDraft(['p1'],{red:'p1'}),'red','black').keepers)==='{"red":"p1"}'&&JSON.stringify(model.freshDraft(['p1']).keepers)==='{}','a game\'s keepers go with its payload');
-  // Goalkeepers: goals conceded per game in goal, fewest first; the next game starts with each team's last keeper.
+  // Goalkeepers: the next game starts with each team's last keeper.
   const kg=(a,b,scoreA,scoreB,keepers)=>({...game(a,b,scoreA,scoreB),keepers});
   const keeperDays=[{...played('k1',[]),rounds:[kg('red','black',1,0,{red:'k1',black:'k2'}),kg('red','white',3,3,{red:'k1'}),game('white','black',2,2),kg('white','black',0,0,{black:'k3'})]},{...played('k2',[]),rounds:[kg('black','red',0,1,{black:'k2'})]}];
-  const gk=model.keeperStats([{id:'k1',name:'One',team:'red'},{id:'k2',name:'Two',team:'black'},{id:'k3',name:'Three',team:'black'},{id:'out',name:'Outfield',team:'white'}],keeperDays);
-  ok(gk.map(k=>k.id+':'+k.games+':'+k.conceded).join()==='k3:1:0,k2:2:2,k1:2:3'&&gk[1].perGame===1&&gk[2].perGame===1.5,'keepers rank by goals conceded per game, fewest first; outfielders are left out');
-  ok(gk.map(k=>k.id+':'+k.teamGames+':'+k.qualified).join()==='k3:4:false,k2:4:true,k1:3:true','a keeper qualifies for the table after keeping goal in at least half their team\'s games');
-  const transferred=model.keeperStats([{id:'m',name:'Mover',team:'white'}],[{...played('m',[]),rounds:[kg('red','black',0,1,{red:'m'}),kg('red','white',2,0,{red:'m'}),game('red','black',0,0),...Array.from({length:4},()=>game('white','black',1,1))]}]);
-  ok(transferred.map(k=>k.id+':'+k.teamGames+':'+k.qualified+':'+k.keptFor).join()==='m:3:true:red','a keeper who has since changed teams is measured against, and labelled with, the team they kept goal for');
   ok(JSON.stringify(model.carriedKeepers(keeperDays[0].rounds,'red','black'))==='{"red":"k1","black":"k3"}'&&JSON.stringify(model.carriedKeepers(keeperDays[0].rounds.slice(0,2),'white','black'))==='{"black":"k2"}'&&JSON.stringify(model.carriedKeepers([],'red','black'))==='{}','a team keeps its keeper from its last game, unless that game had none');
   ok(model.gameClock({...draft,elapsed:60000,startedAt:1000},121000)===model.GAME_MS-180000&&model.gameClock({...draft,elapsed:60000,startedAt:null},999999)===model.GAME_MS-60000&&model.gameClock({...draft,elapsed:0,startedAt:0},model.GAME_MS*2)===0,'game clock counts down, pauses, and stops at zero');
   ok(model.draftKey('d1',3)!==model.draftKey('d1',4)&&model.draftKey('d1',3)!==model.draftKey('d2',3),'each game of each day has its own draft');

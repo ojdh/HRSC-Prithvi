@@ -121,19 +121,6 @@ export function playerStats(players:Player[],days:Day[]){
     return {...p,played,wins,goals,assists,attended,attendance:playedDays.length?Math.round(attended/playedDays.length*100):0};
   }).sort((a,b)=>b.goals-a.goals||b.assists-a.assists||b.wins-a.wins||a.name.localeCompare(b.name));
 }
-// Players who kept goal: games in goal and the goals their team conceded in them, ranked by goals conceded per game
-// (fewest first), then by more games in goal. A keeper qualifies for the table after keeping goal in at least half
-// the games played over the same days by the teams they kept goal for; keptFor is the team of their latest game in goal.
-export function keeperStats(players:Player[],days:Day[]){
-  const kept=new Map<string,{games:number;conceded:number;teams:Set<Team>;keptFor:Team}>();
-  for(const d of [...days].sort((a,b)=>a.date.localeCompare(b.date)))for(const r of d.rounds)for(const [team,id] of Object.entries(r.keepers??{}) as [Team,string][]){
-    const line=kept.get(id)??{games:0,conceded:0,teams:new Set<Team>(),keptFor:team};line.games++;line.conceded+=team===r.a?r.scoreB:r.scoreA;line.teams.add(team);line.keptFor=team;kept.set(id,line);
-  }
-  const played=Object.fromEntries(teamStats(days).map(s=>[s.team,s.played])) as Record<Team,number>;
-  return players.flatMap(p=>{const line=kept.get(p.id);if(!line)return [];const {teams,...rest}=line,teamGames=[...teams].reduce((n,t)=>n+played[t],0);
-    return [{...p,...rest,perGame:line.conceded/line.games,teamGames,qualified:line.games*2>=teamGames}];})
-    .sort((a,b)=>a.perGame-b.perGame||b.games-a.games||a.name.localeCompare(b.name));
-}
 // The keepers a new game starts with: each team's keeper from the last game it played, if that game had one.
 export function carriedKeepers(rounds:Round[],a:Team,b:Team):Keepers{
   const keepers:Keepers={};
@@ -224,6 +211,18 @@ export function playerOfTheSeason(days:Pick<Day,'id'|'poll'>[],polls:Record<stri
       const line=lines.get(s.candidate)??{candidate:s.candidate,points:0,first:0,second:0,third:0};
       line.points+=SEASON_POINTS[place];line[(['first','second','third'] as const)[place]]++;lines.set(s.candidate,line);}}
   return [...lines.values()].sort((a,b)=>b.points-a.points||b.first-a.first||b.second-a.second||b.third-a.third);
+}
+// Each player's stat points averaged over the closed matchdays in the period they were scored on, highest first.
+export type AverageLine = {candidate:string;matchdays:number;average:number};
+export function averageStatPoints(days:Pick<Day,'id'|'poll'>[],polls:Record<string,{scores?:CombinedScore[]}>):AverageLine[]{
+  const totals=new Map<string,{matchdays:number;points:number}>();
+  for(const day of days.filter(d=>d.poll==='closed'))for(const s of polls[day.id]?.scores??[]){
+    const total=totals.get(s.candidate)??{matchdays:0,points:0};total.matchdays++;total.points+=s.points;totals.set(s.candidate,total);}
+  return [...totals].map(([candidate,t])=>({candidate,matchdays:t.matchdays,average:t.points/t.matchdays})).sort((a,b)=>b.average-a.average||b.matchdays-a.matchdays);
+}
+// A player's stat points on each closed matchday they were scored on, oldest first.
+export function pointsByMatchday(days:Pick<Day,'id'|'date'|'poll'>[],polls:Record<string,{scores?:CombinedScore[]}>,player:string){
+  return days.filter(d=>d.poll==='closed').sort((a,b)=>a.date.localeCompare(b.date)).flatMap(d=>{const line=polls[d.id]?.scores?.find(s=>s.candidate===player);return line?[{date:d.date,points:line.points}]:[];});
 }
 // Player of the day: everyone tied on the highest combined score, if it is above zero. Scores arrive highest first.
 export function bestPlayers(scores:CombinedScore[]){const top=scores[0]?.score??0;return top>0?scores.filter(s=>s.score===top):[];}
