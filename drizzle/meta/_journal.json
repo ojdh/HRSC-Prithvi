@@ -113,6 +113,13 @@
       "when": 1792713645430,
       "tag": "0015_chat_images",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1794045600000,
+      "tag": "0016_freeze_closed_day_scoring",
+      "breakpoints": true
     }
   ]
 }
