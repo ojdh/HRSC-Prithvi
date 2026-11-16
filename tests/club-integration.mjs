@@ -606,6 +606,35 @@ try{
   const ownerView=(await get()).data,editLog=ownerView.log.filter(e=>e.dayId===editDay&&e.action==='editRound');
   ok(editLog.length===4&&editLog[0].by===owner.id&&editLog[0].roundId===edited[0].id&&editLog[0].before.scoreB===2&&editLog[0].after.scoreA===1&&editLog[0].date==='2026-09-13'&&Date.parse(editLog[0].at)<=Date.now(),'edits are logged newest first with who, when, before and after');
   ok(!('log' in (await get('absent-user')).data),'players never receive the edit log');
+  // A game missed from a finished matchday is added before a later game. Game 1 was first saved as a draw, so the
+  // board skipped the game its corrected result leads to; the missed game's teams follow from game 1.
+  const missedDay=(await success('addDays',{from:'2026-08-16',...slot})).dayIds[0];
+  await success('setupDay',{dayId:missedDay,a:'red',b:'black',firstExit:'red'});
+  await success('addRound',{dayId:missedDay,scoreA:1,scoreB:1,lineup:[owner.id,black.id],goals:[goal('red',owner.id),goal('black',black.id)]});
+  await success('addRound',{dayId:missedDay,scoreA:0,scoreB:1,lineup:[black.id,white.id],goals:[goal('white',white.id)]});
+  const [firstGame,laterGame]=(await dayOf(missedDay)).rounds;
+  await success('editRound',{dayId:missedDay,roundId:firstGame.id,scoreA:1,scoreB:0,lineup:[owner.id,black.id],goals:[goal('red',owner.id)]});
+  const missedGame={dayId:missedDay,position:2,scoreA:0,scoreB:0,lineup:[owner.id,red.id,white.id],goals:[],keepers:{white:white.id}};
+  ok((await post('insertRound',missedGame,'absent-user')).status===403,'players cannot add a missed game');
+  for(const position of [0,3])ok((await post('insertRound',{...missedGame,position})).status===400,'a missed game goes before a recorded game, not at position '+position);
+  ok((await post('insertRound',{...missedGame,lineup:[black.id,white.id]})).status===400,'a missed game\'s lineup comes from the teams that follow game 1, not from the game it goes before');
+  ok((await post('insertRound',{...missedGame,scoreB:1,goals:[goal('black',black.id)]})).status===400,'a missed game\'s goals belong to its own two teams');
+  await success('insertRound',missedGame);
+  const inserted=(await dayOf(missedDay)).rounds;
+  ok(inserted.length===3&&inserted[0].id===firstGame.id&&inserted[1].a==='red'&&inserted[1].b==='white'&&inserted[1].exit==='red'&&inserted[1].winner===null&&inserted[1].keepers.white===white.id,'the missed game becomes game 2 between game 1\'s winner and the team that sat it out, and a draw sends off the team that stayed on');
+  ok(JSON.stringify(inserted[2])===JSON.stringify(laterGame),'the games after it keep their teams, scores, winners and exits as played');
+  const insertLog=(await get()).data.log[0];
+  ok(insertLog.action==='insertRound'&&insertLog.dayId===missedDay&&insertLog.roundId===inserted[1].id&&insertLog.by===owner.id&&insertLog.after.a==='red'&&insertLog.after.b==='white'&&!insertLog.before,'adding a missed game is in the edit log');
+  // A live session keeps its unsaved game under its number, so nothing is inserted until the session is over.
+  const today=new Date().toLocaleDateString('en-CA',{timeZone:'America/Edmonton'});
+  const liveDay=(await get()).data.days.find(d=>d.date===today)?.id??(await success('addDays',{from:today,...slot})).dayIds[0];
+  await success('setupDay',{dayId:liveDay,a:'red',b:'black',firstExit:'red'});
+  await success('addRound',{dayId:liveDay,scoreA:1,scoreB:0,lineup:[owner.id,black.id],goals:[goal('red',owner.id)]});
+  const beforeLiveGame={dayId:liveDay,position:1,scoreA:0,scoreB:0,lineup:[owner.id,black.id],goals:[]};
+  ok((await post('insertRound',beforeLiveGame)).status===400,'a missed game cannot be added while today\'s session is live');
+  await success('endDay',{dayId:liveDay});await success('insertRound',beforeLiveGame);
+  ok((await dayOf(liveDay)).rounds.length===2,'a missed game can be added once today\'s session is ended');
+  await success('requestDayDeletion',{dayId:liveDay});
   // Voting and a clip on the played day, so deletion has something to clean up.
   await success('openPoll',{dayId:editDay});await success('vote',{dayId:editDay,candidates:[owner.id,white.id]},'black-user');await success('fairPlayVote',{dayId:editDay,candidate:owner.id},'black-user');
   const editClip=(await dayOf(editDay)).videoKey;

@@ -181,6 +181,16 @@ export async function POST(req:Request){try{
       const lineup=playedLineup(day,round.a,round.b,input);
       Object.assign(round,{scoreA:input.scoreA,scoreB:input.scoreB,lineup,goals:input.goals,keepers:input.keepers,...result(round.a,round.b,input.scoreA,input.scoreB,incumbentAt(day,index))});
       record(club,actor(me),'editRound',day,{roundId:round.id,before,after:snapshot(round)});
+    }else if(action==='insertRound'){
+      const input=roundInput.extend({position:z.number().int().min(1,'Choose a recorded game to add the missed game before.')}).parse(body);
+      const day=club.days.find(d=>d.id===input.dayId);check(day&&isReady(day),'Match day not found.');
+      // Inserting renumbers later games, and the live board keeps an unsaved game under its number, so this waits until the session is over.
+      check(day.date<clubToday()||day.ended||day.poll==='closed','A missed game can be added once the session is over: from the next day, or once the matchday is ended or its voting closes.');
+      check(input.position<=day.rounds.length,'Choose a recorded game to add the missed game before. Record a game after the last one under Live.');
+      // The missed game's teams follow from the games before it, as the live board would have chosen them; later games keep their stored teams.
+      const index=input.position-1,n=nextMatch({...day,rounds:day.rounds.slice(0,index)}),lineup=playedLineup(day,n.a,n.b,input);
+      const round={id:crypto.randomUUID(),a:n.a,b:n.b,scoreA:input.scoreA,scoreB:input.scoreB,lineup,goals:input.goals,keepers:input.keepers,...result(n.a,n.b,input.scoreA,input.scoreB,n.incumbent)};
+      day.rounds.splice(index,0,round);record(club,actor(me),'insertRound',day,{roundId:round.id,after:snapshot(round)});
     }else if(action==='undoRound'){
       const day=club.days.find(d=>d.id===body.dayId);check(day&&day.rounds.length,'There is no round to undo.');check(day.rounds.at(-1)?.id===body.roundId,'The latest round has changed. Refresh first.',409);
       const round=day.rounds.pop()!;record(club,actor(me),'undoRound',day,{roundId:round.id,before:snapshot(round)});
